@@ -1,0 +1,49 @@
+# ML Engine API Configuration
+
+server:
+  port: 8080
+
+spring:
+  application:
+    name: ml-engine-api
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
+
+# ML Engine Settings
+ml-engine:
+  python-path: python3
+  models-dir: ./models
+  data-dir: ./data
+  temp-dir: ./temp
+  
+  # Training defaults
+  defaults:
+    algorithm: xgboost
+    problem-type: classification
+    test-size: 0.2
+
+# Swagger/OpenAPI
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operationsSorter: method
+
+# Actuator (health checks)
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+
+# Logging
+logging:
+  level:
+    com.mlengine: DEBUG
+    org.springframework: INFO
