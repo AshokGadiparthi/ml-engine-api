@@ -144,9 +144,22 @@ public class TrainController {
     // ========== Helper Methods ==========
     
     private String saveUploadedFile(MultipartFile file) throws Exception {
+        // Create temp directory if it doesn't exist
+        Path tempDir = Path.of(config.getTempDir());
+        if (!Files.exists(tempDir)) {
+            Files.createDirectories(tempDir);
+            log.info("Created temp directory: {}", tempDir.toAbsolutePath());
+        }
+        
         String filename = UUID.randomUUID() + "_" + file.getOriginalFilename();
-        Path tempPath = Path.of(config.getTempDir(), filename);
-        file.transferTo(tempPath.toFile());
+        Path tempPath = tempDir.resolve(filename);
+        
+        // UseInputStream to write file (more reliable)
+        try (var inputStream = file.getInputStream()) {
+            Files.copy(inputStream, tempPath);
+        }
+        
+        log.info("Saved uploaded file to: {}", tempPath.toAbsolutePath());
         return tempPath.toString();
     }
 }

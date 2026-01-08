@@ -30,21 +30,27 @@ public class MLEngineConfig {
     
     @PostConstruct
     public void init() {
-        // Create directories if they don't exist
-        createDirectory(modelsDir);
-        createDirectory(dataDir);
-        createDirectory(tempDir);
+        // Create directories if they don't exist (use absolute paths)
+        modelsDir = createAbsoluteDirectory(modelsDir);
+        dataDir = createAbsoluteDirectory(dataDir);
+        tempDir = createAbsoluteDirectory(tempDir);
         
         System.out.println("📁 ML Engine directories initialized:");
-        System.out.println("   Models: " + new File(modelsDir).getAbsolutePath());
-        System.out.println("   Data: " + new File(dataDir).getAbsolutePath());
-        System.out.println("   Temp: " + new File(tempDir).getAbsolutePath());
+        System.out.println("   Models: " + modelsDir);
+        System.out.println("   Data: " + dataDir);
+        System.out.println("   Temp: " + tempDir);
     }
     
-    private void createDirectory(String path) {
-        File dir = new File(path);
-        if (!dir.exists()) {
-            dir.mkdirs();
+    private String createAbsoluteDirectory(String path) {
+        try {
+            java.nio.file.Path dirPath = java.nio.file.Path.of(path).toAbsolutePath();
+            if (!java.nio.file.Files.exists(dirPath)) {
+                java.nio.file.Files.createDirectories(dirPath);
+            }
+            return dirPath.toString();
+        } catch (Exception e) {
+            System.err.println("Failed to create directory: " + path + " - " + e.getMessage());
+            return path;
         }
     }
 }
