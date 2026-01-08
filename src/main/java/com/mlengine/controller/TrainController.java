@@ -6,9 +6,13 @@ import com.mlengine.service.MLService;
 import com.mlengine.config.MLEngineConfig;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -35,17 +39,33 @@ public class TrainController {
     /**
      * Train a new model.
      */
-    @PostMapping
+    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "Train a new model", 
-               description = "Upload training data and train a new ML model")
+               description = "Upload training data (CSV) and train a new ML model")
     public ResponseEntity<TrainResponse> train(
-            @RequestParam("file") MultipartFile file,
+            @Parameter(description = "CSV file with training data", required = true,
+                      content = @Content(mediaType = MediaType.MULTIPART_FORM_DATA_VALUE))
+            @RequestPart("file") MultipartFile file,
+            
+            @Parameter(description = "Name of the target column", required = true, example = "approved")
             @RequestParam("targetColumn") String targetColumn,
+            
+            @Parameter(description = "ML algorithm", example = "xgboost")
             @RequestParam(defaultValue = "xgboost") String algorithm,
+            
+            @Parameter(description = "Problem type", example = "classification")
             @RequestParam(defaultValue = "classification") String problemType,
+            
+            @Parameter(description = "Test set size (0.0 to 1.0)", example = "0.2")
             @RequestParam(defaultValue = "0.2") double testSize,
+            
+            @Parameter(description = "Use AutoML to find best algorithm")
             @RequestParam(defaultValue = "false") boolean useAutoML,
+            
+            @Parameter(description = "Tune hyperparameters")
             @RequestParam(defaultValue = "false") boolean tuneHyperparameters,
+            
+            @Parameter(description = "Model name", example = "my_model")
             @RequestParam(required = false) String modelName) {
         
         try {
@@ -79,40 +99,6 @@ public class TrainController {
             
         } catch (Exception e) {
             log.error("Training error: {}", e.getMessage(), e);
-            return ResponseEntity.badRequest().body(
-                TrainResponse.builder()
-                    .status("FAILED")
-                    .error(e.getMessage())
-                    .build()
-            );
-        }
-    }
-    
-    /**
-     * Train model asynchronously (returns job ID immediately).
-     */
-    @PostMapping("/async")
-    @Operation(summary = "Train model asynchronously",
-               description = "Start training and return job ID for status tracking")
-    public ResponseEntity<TrainResponse> trainAsync(
-            @RequestParam("file") MultipartFile file,
-            @Valid @ModelAttribute TrainRequest request) {
-        
-        try {
-            String dataPath = saveUploadedFile(file);
-            
-            // Start async training
-            mlService.trainModelAsync(dataPath, request);
-            
-            return ResponseEntity.accepted().body(
-                TrainResponse.builder()
-                    .status("PENDING")
-                    .message("Training job started")
-                    .build()
-            );
-            
-        } catch (Exception e) {
-            log.error("Async training error: {}", e.getMessage(), e);
             return ResponseEntity.badRequest().body(
                 TrainResponse.builder()
                     .status("FAILED")
