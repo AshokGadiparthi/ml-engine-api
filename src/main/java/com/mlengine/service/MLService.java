@@ -230,7 +230,7 @@ public class MLService {
         command.add("--target=" + request.getTargetColumn());
         command.add("--algorithm=" + request.getAlgorithm());
         command.add("--problem-type=" + request.getProblemType());
-        command.add("--output=" + config.getModelsDir());
+        command.add("--output-dir=" + config.getModelsDir());
         
         if (request.isUseAutoML()) {
             command.add("--auto-ml");
