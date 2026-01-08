@@ -307,6 +307,12 @@ public class MLService {
     }
     
     private void registerModel(String modelId, TrainRequest request, TrainResponse trainResponse) {
+        // Convert metrics to Map<String, Object> for ModelInfo
+        Map<String, Object> metricsAsObject = new HashMap<>();
+        if (trainResponse.getMetrics() != null) {
+            metricsAsObject.putAll(trainResponse.getMetrics());
+        }
+        
         ModelInfo model = ModelInfo.builder()
                 .modelId(modelId)
                 .name(request.getModelName() != null ? request.getModelName() : modelId)
@@ -315,7 +321,7 @@ public class MLService {
                 .status("READY")
                 .trainedAt(LocalDateTime.now())
                 .modelPath(trainResponse.getModelPath())
-                .metrics(trainResponse.getMetrics())
+                .metadata(metricsAsObject)
                 .build();
         
         models.put(modelId, model);
