@@ -134,6 +134,7 @@ public class AutoMLJob {
 
     private LocalDateTime completedAt;
 
+    @Column(columnDefinition = "TEXT")
     private String errorMessage;
 
     @CreationTimestamp

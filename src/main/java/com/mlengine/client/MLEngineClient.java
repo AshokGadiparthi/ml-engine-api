@@ -49,6 +49,11 @@ public class MLEngineClient {
         String url = baseUrl + "/automl/start";
         
         Map<String, Object> request = new HashMap<>();
+        // Generate a dataset_id from the path (FastAPI requires this)
+        String datasetId = datasetPath != null ? 
+            datasetPath.substring(datasetPath.lastIndexOf('/') + 1).replace(".csv", "") : 
+            "dataset_" + System.currentTimeMillis();
+        request.put("dataset_id", datasetId);
         request.put("dataset_path", datasetPath);
         request.put("target_column", targetColumn);
         request.put("problem_type", problemType.toLowerCase());
