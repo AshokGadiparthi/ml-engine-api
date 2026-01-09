@@ -5,12 +5,10 @@ import com.mlengine.model.dto.PredictionDTO;
 import com.mlengine.model.entity.BatchPredictionJob;
 import com.mlengine.model.entity.Model;
 import com.mlengine.model.entity.Prediction;
-import com.mlengine.model.entity.Project;
 import com.mlengine.model.enums.ProblemType;
 import com.mlengine.repository.BatchPredictionJobRepository;
 import com.mlengine.repository.ModelRepository;
 import com.mlengine.repository.PredictionRepository;
-import com.mlengine.repository.ProjectRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -39,7 +37,6 @@ public class PredictionService {
     private final PredictionRepository predictionRepository;
     private final BatchPredictionJobRepository batchJobRepository;
     private final ModelRepository modelRepository;
-    private final ProjectRepository projectRepository;
     private final MLEngineClient mlEngineClient;
 
     // ========== SINGLE PREDICTION ==========
@@ -194,19 +191,15 @@ public class PredictionService {
         Model model = modelRepository.findById(modelId)
                 .orElseThrow(() -> new IllegalArgumentException("Model not found: " + modelId));
 
-        Project project = null;
-        if (projectId != null) {
-            project = projectRepository.findById(projectId).orElse(null);
-        }
-
         // Create batch job
         String name = jobName != null ? jobName : "Batch " + LocalDateTime.now().format(
                 DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
 
         BatchPredictionJob job = BatchPredictionJob.builder()
-                .name(name)
-                .model(model)
-                .project(project)
+                .jobName(name)
+                .modelId(model.getId())
+                .modelName(model.getName())
+                .projectId(projectId)
                 .status("QUEUED")
                 .inputFileName(file.getOriginalFilename())
                 .totalRecords(0)
@@ -443,13 +436,11 @@ public class PredictionService {
     // ========== HELPER METHODS ==========
 
     private PredictionDTO.BatchResponse toBatchResponse(BatchPredictionJob job) {
-        Model model = job.getModel();
-
         return PredictionDTO.BatchResponse.builder()
                 .jobId(job.getId())
-                .jobName(job.getName())
-                .modelId(model.getId())
-                .modelName(model.getName())
+                .jobName(job.getJobName())
+                .modelId(job.getModelId())
+                .modelName(job.getModelName())
                 .status(job.getStatus())
                 .statusLabel(job.getStatus())
                 .totalRecords(job.getTotalRecords())
@@ -474,8 +465,8 @@ public class PredictionService {
     private PredictionDTO.BatchListItem toBatchListItem(BatchPredictionJob job) {
         return PredictionDTO.BatchListItem.builder()
                 .jobId(job.getId())
-                .jobName(job.getName())
-                .modelName(job.getModel().getName())
+                .jobName(job.getJobName())
+                .modelName(job.getModelName())
                 .status(job.getStatus())
                 .statusLabel(job.getStatus())
                 .totalRecords(job.getTotalRecords())
