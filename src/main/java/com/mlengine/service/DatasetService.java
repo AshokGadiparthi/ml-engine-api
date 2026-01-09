@@ -173,6 +173,94 @@ public class DatasetService {
     }
 
     /**
+     * Get data quality report for a dataset.
+     */
+    public DatasetDTO.QualityReport getQualityReport(String id) {
+        Dataset dataset = datasetRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Dataset not found: " + id));
+
+        log.info("Generating quality report for dataset: {}", id);
+
+        // Parse column information
+        List<DatasetDTO.ColumnInfo> columns = Collections.emptyList();
+        if (dataset.getColumnsJson() != null) {
+            try {
+                columns = objectMapper.readValue(
+                        dataset.getColumnsJson(),
+                        new TypeReference<List<DatasetDTO.ColumnInfo>>() {}
+                );
+            } catch (Exception e) {
+                log.error("Failed to parse columns JSON", e);
+            }
+        }
+
+        // Build column quality report
+        List<DatasetDTO.ColumnQuality> columnQuality = new ArrayList<>();
+        for (DatasetDTO.ColumnInfo col : columns) {
+            String issue = null;
+            boolean hasOutliers = false;
+
+            // Detect quality issues
+            if (col.getMissingPct() != null && col.getMissingPct() > 20) {
+                issue = "High missing values (" + String.format("%.1f%%", col.getMissingPct()) + ")";
+            } else if (col.getUniqueValues() != null && col.getUniqueValues() == 1) {
+                issue = "Constant value (no variation)";
+            } else if ("numeric".equals(col.getDataType()) && col.getStd() != null && col.getStd() > 1000) {
+                hasOutliers = true;
+                issue = "Potential outliers detected";
+            }
+
+            columnQuality.add(DatasetDTO.ColumnQuality.builder()
+                    .column(col.getName())
+                    .dataType(col.getDataType())
+                    .missingPct(col.getMissingPct() != null ? col.getMissingPct() : 0.0)
+                    .uniqueValues(col.getUniqueValues())
+                    .hasOutliers(hasOutliers)
+                    .qualityIssue(issue)
+                    .build());
+        }
+
+        // Calculate scores
+        double completenessScore = 100.0 - (dataset.getMissingValuesPct() != null ? dataset.getMissingValuesPct() : 0.0);
+        double uniquenessScore = 100.0 - (dataset.getDuplicateRowsPct() != null ? dataset.getDuplicateRowsPct() : 0.0);
+        double consistencyScore = calculateConsistencyScore(columnQuality);
+        double overallScore = (completenessScore + uniquenessScore + consistencyScore) / 3.0;
+
+        // Calculate missing cells
+        long totalCells = (dataset.getRowCount() != null ? dataset.getRowCount() : 0) * 
+                          (dataset.getColumnCount() != null ? dataset.getColumnCount() : 0);
+        long missingCells = (long) ((dataset.getMissingValuesPct() != null ? dataset.getMissingValuesPct() : 0.0) * totalCells / 100.0);
+        long duplicateRows = (long) ((dataset.getDuplicateRowsPct() != null ? dataset.getDuplicateRowsPct() : 0.0) * 
+                             (dataset.getRowCount() != null ? dataset.getRowCount() : 0) / 100.0);
+
+        return DatasetDTO.QualityReport.builder()
+                .datasetId(id)
+                .overallScore(Math.round(overallScore * 10.0) / 10.0)
+                .completenessScore(Math.round(completenessScore * 10.0) / 10.0)
+                .uniquenessScore(Math.round(uniquenessScore * 10.0) / 10.0)
+                .consistencyScore(Math.round(consistencyScore * 10.0) / 10.0)
+                .totalRows(dataset.getRowCount())
+                .duplicateRows(duplicateRows)
+                .missingCells(missingCells)
+                .missingPct(dataset.getMissingValuesPct() != null ? dataset.getMissingValuesPct() : 0.0)
+                .columnQuality(columnQuality)
+                .build();
+    }
+
+    /**
+     * Calculate consistency score based on column quality issues.
+     */
+    private double calculateConsistencyScore(List<DatasetDTO.ColumnQuality> columnQuality) {
+        if (columnQuality.isEmpty()) return 100.0;
+        
+        long issueCount = columnQuality.stream()
+                .filter(cq -> cq.getQualityIssue() != null)
+                .count();
+        
+        return 100.0 - (issueCount * 100.0 / columnQuality.size());
+    }
+
+    /**
      * Update dataset.
      */
     @Transactional

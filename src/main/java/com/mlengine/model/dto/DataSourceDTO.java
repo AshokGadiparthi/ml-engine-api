@@ -201,4 +201,53 @@ public class DataSourceDTO {
         private Integer columnCount;
         private String sizeEstimate;
     }
+
+    /**
+     * Browse response - list of tables in data source.
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class BrowseResponse {
+        private String dataSourceId;
+        private String dataSourceName;
+        private DataSourceType dataSourceType;
+        private List<TableInfo> tables;
+        private Integer totalTables;
+        private DataSourceStatus connectionStatus;
+        private String message;
+        private LocalDateTime browsedAt;
+    }
+
+    /**
+     * Table preview response.
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class TablePreviewResponse {
+        private String dataSourceId;
+        private String tableName;
+        private String schema;
+        private List<TableColumnInfo> columns;
+        private List<List<Object>> rows;
+        private Long totalRows;
+        private Integer previewRows;
+    }
+
+    /**
+     * Column info for table preview.
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class TableColumnInfo {
+        private String name;
+        private String dataType;
+        private Boolean nullable;
+        private Boolean primaryKey;
+    }
 }

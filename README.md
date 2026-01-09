@@ -1,6 +1,6 @@
 # ML Engine API v2.0
 
-Enterprise Machine Learning Platform REST API - Complete (All 5 Phases)
+Enterprise Machine Learning Platform REST API - Complete (All 5 Phases + Data Management)
 
 ## 🚀 Quick Start
 
@@ -29,12 +29,30 @@ mvn spring-boot:run
 | GET | `/api/projects` | List projects |
 | GET | `/api/projects/{id}/stats` | Dashboard stats |
 
+### Data Sources ⭐ UPDATED
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/datasources` | Create data source |
+| GET | `/api/datasources` | List data sources |
+| GET | `/api/datasources/{id}` | Get data source |
+| POST | `/api/datasources/test` | Test new connection |
+| POST | `/api/datasources/{id}/test` | Test existing connection |
+| GET | `/api/datasources/{id}/browse` | ⭐ Browse tables |
+| GET | `/api/datasources/{id}/tables/{name}/preview` | ⭐ Preview table data |
+| PUT | `/api/datasources/{id}` | Update data source |
+| DELETE | `/api/datasources/{id}` | Delete data source |
+
 ### Datasets
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/datasets` | Upload dataset |
+| GET | `/api/datasets` | List datasets |
+| GET | `/api/datasets/{id}` | Get dataset |
 | GET | `/api/datasets/{id}/preview` | Preview data |
-| GET | `/api/datasets/{id}/quality` | Quality report |
+| GET | `/api/datasets/{id}/columns` | Column info |
+| GET | `/api/datasets/{id}/quality` | ⭐ Quality report |
+| PUT | `/api/datasets/{id}` | Update dataset |
+| DELETE | `/api/datasets/{id}` | Delete dataset |
 
 ### Training Jobs
 | Method | Endpoint | Description |
@@ -68,7 +86,7 @@ mvn spring-boot:run
 | GET | `/api/models/{id}/pdp/{feature}` | Partial Dependence Plot |
 | POST | `/api/models/{id}/whatif` | What-If analysis |
 
-### Predictions ⭐ NEW
+### Predictions
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/predictions/single` | Single prediction |
@@ -77,6 +95,12 @@ mvn spring-boot:run
 | GET | `/api/predictions/batch/{id}/download` | Download results |
 | GET | `/api/predictions/history` | Prediction history |
 | POST | `/api/predictions/realtime/{modelId}` | Low-latency prediction |
+
+### Activities
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/activities` | List activities |
+| GET | `/api/activities/recent` | Recent activities |
 
 ## ✅ All Phases Complete
 
@@ -87,9 +111,21 @@ mvn spring-boot:run
 | Phase 3 | ✅ | Models, Metrics, Evaluation |
 | Phase 4 | ✅ | SHAP, LIME, PDP, What-If |
 | Phase 5 | ✅ | Single & Batch Predictions |
+| Data Mgmt | ✅ | Browse, Test, Preview, Quality |
 
 ## 📊 Supported Algorithms (14)
 
 XGBoost, LightGBM, CatBoost, Random Forest, Gradient Boosting,
 Neural Network (MLP), Logistic Regression, Linear Regression,
 SVM, KNN, Naive Bayes, Decision Tree, Extra Trees, AdaBoost
+
+## 🗄️ Supported Data Sources
+
+| Type | Test | Browse | Preview |
+|------|------|--------|---------|
+| PostgreSQL | ✅ | ✅ | ✅ |
+| MySQL | ✅ | ✅ | ✅ |
+| SQLite | ✅ | ✅ | ✅ |
+| BigQuery | Mock | Mock | Mock |
+| AWS S3 | Mock | Mock | Mock |
+| GCS | Mock | Mock | Mock |

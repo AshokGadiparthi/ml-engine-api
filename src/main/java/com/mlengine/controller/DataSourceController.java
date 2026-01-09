@@ -80,4 +80,23 @@ public class DataSourceController {
         dataSourceService.deleteDataSource(id);
         return ResponseEntity.noContent().build();
     }
+
+    @GetMapping("/{id}/browse")
+    @Operation(summary = "Browse data source tables",
+               description = "Get list of tables/collections from the data source")
+    public ResponseEntity<DataSourceDTO.BrowseResponse> browseDataSource(
+            @PathVariable String id) {
+        return ResponseEntity.ok(dataSourceService.browseDataSource(id));
+    }
+
+    @GetMapping("/{id}/tables/{tableName}/preview")
+    @Operation(summary = "Preview table data",
+               description = "Get sample data from a specific table in the data source")
+    public ResponseEntity<DataSourceDTO.TablePreviewResponse> previewTable(
+            @PathVariable String id,
+            @PathVariable String tableName,
+            @Parameter(description = "Number of rows to preview")
+            @RequestParam(defaultValue = "100") int rows) {
+        return ResponseEntity.ok(dataSourceService.previewTable(id, tableName, rows));
+    }
 }
