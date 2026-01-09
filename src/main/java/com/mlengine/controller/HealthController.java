@@ -62,44 +62,4 @@ public class HealthController {
 
         return ResponseEntity.ok(health);
     }
-
-    @GetMapping("/algorithms")
-    @Operation(summary = "List available algorithms")
-    public ResponseEntity<Map<String, Object>> getAlgorithms() {
-        Map<String, Object> algorithms = new HashMap<>();
-
-        algorithms.put("classification", new String[]{
-            "logistic_regression",
-            "random_forest",
-            "xgboost",
-            "lightgbm",
-            "gradient_boosting",
-            "svm",
-            "knn",
-            "naive_bayes",
-            "decision_tree",
-            "extra_trees",
-            "adaboost",
-            "neural_network",
-            "catboost"
-        });
-
-        algorithms.put("regression", new String[]{
-            "linear_regression",
-            "ridge",
-            "lasso",
-            "elastic_net",
-            "random_forest",
-            "xgboost",
-            "lightgbm",
-            "gradient_boosting",
-            "svr",
-            "knn",
-            "decision_tree",
-            "extra_trees",
-            "neural_network"
-        });
-
-        return ResponseEntity.ok(algorithms);
-    }
 }
