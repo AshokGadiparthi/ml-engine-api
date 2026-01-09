@@ -53,6 +53,11 @@ ml-engine:
     models-dir: ./storage/models
     temp-dir: ./storage/temp
     exports-dir: ./storage/exports
+  # FastAPI ML Engine connection
+  api:
+    base-url: ${ML_ENGINE_API_URL:http://localhost:8000/api}
+    timeout: 60000
+    enabled: true  # Set to false to use mock mode
 
 # Swagger/OpenAPI
 springdoc:
