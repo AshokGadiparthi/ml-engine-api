@@ -19,7 +19,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,6 +26,8 @@ import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Service for AutoML operations.
@@ -45,6 +46,9 @@ public class AutoMLService {
 
     // Track running jobs for cancellation
     private final Map<String, CompletableFuture<?>> runningJobs = new ConcurrentHashMap<>();
+    
+    // Thread pool for async execution
+    private final ExecutorService executorService = Executors.newFixedThreadPool(4);
 
     /**
      * Start a new AutoML job.
@@ -108,20 +112,29 @@ public class AutoMLService {
 
         job = autoMLJobRepository.save(job);
 
-        // Start async processing
-        String jobId = job.getId();
-        CompletableFuture<?> future = runAutoMLAsync(jobId);
+        // Start async processing using CompletableFuture.runAsync with executor
+        final String jobId = job.getId();
+        CompletableFuture<?> future = CompletableFuture.runAsync(() -> {
+            try {
+                executeAutoML(jobId);
+            } catch (Exception e) {
+                log.error("AutoML execution failed for job: {}", jobId, e);
+            }
+        }, executorService);
         runningJobs.put(jobId, future);
 
         return toJobResponse(job, "AutoML job started successfully");
     }
 
     /**
-     * Async method to run AutoML.
+     * Execute AutoML job - runs in separate thread.
+     * This method handles its own transactions.
      */
-    @Async
-    public CompletableFuture<Void> runAutoMLAsync(String jobId) {
+    private void executeAutoML(String jobId) {
         try {
+            log.info("Executing AutoML job: {}", jobId);
+            
+            // Fetch fresh copy of job
             AutoMLJob job = autoMLJobRepository.findById(jobId)
                     .orElseThrow(() -> new IllegalArgumentException("Job not found"));
 
@@ -135,6 +148,14 @@ public class AutoMLService {
 
             // Phase 1: Data Validation
             Thread.sleep(2000); // Simulate work
+            
+            // Check if stopped
+            if (!runningJobs.containsKey(jobId)) {
+                markJobStopped(jobId);
+                return;
+            }
+            
+            job = autoMLJobRepository.findById(jobId).orElseThrow();
             job.setProgress(15);
             job.setCurrentPhase("FEATURE_ENGINEERING");
             addLog(job, "INFO", "Data validation completed");
@@ -143,8 +164,18 @@ public class AutoMLService {
             // Phase 2: Feature Engineering
             if (Boolean.TRUE.equals(job.getEnableFeatureEngineering())) {
                 Thread.sleep(3000);
+                
+                // Check if stopped
+                if (!runningJobs.containsKey(jobId)) {
+                    markJobStopped(jobId);
+                    return;
+                }
+                
+                job = autoMLJobRepository.findById(jobId).orElseThrow();
                 addLog(job, "INFO", "Feature engineering: generated additional features");
             }
+            
+            job = autoMLJobRepository.findById(jobId).orElseThrow();
             job.setProgress(25);
             job.setCurrentPhase("ALGORITHM_SELECTION");
             job.setStatus(JobStatus.TRAINING);
@@ -155,26 +186,36 @@ public class AutoMLService {
             List<AutoMLDTO.LeaderboardEntry> leaderboard = new ArrayList<>();
             List<String> algorithms = getAlgorithmsForProblemType(job.getProblemType());
             int totalAlgorithms = algorithms.size();
+            
             job.setAlgorithmsTotal(totalAlgorithms);
+            autoMLJobRepository.save(job);
 
             double bestScore = 0;
             String bestAlgorithm = null;
 
             for (int i = 0; i < algorithms.size(); i++) {
                 // Check if job was stopped
-                if (runningJobs.get(jobId) == null) {
-                    job.setStatus(JobStatus.STOPPED);
-                    autoMLJobRepository.save(job);
-                    return CompletableFuture.completedFuture(null);
+                if (!runningJobs.containsKey(jobId)) {
+                    markJobStopped(jobId);
+                    return;
                 }
 
                 String algorithm = algorithms.get(i);
+                
+                // Refresh job from database
+                job = autoMLJobRepository.findById(jobId).orElseThrow();
                 job.setCurrentAlgorithm(algorithm);
                 addLog(job, "INFO", "Testing " + algorithm + "...");
                 autoMLJobRepository.save(job);
 
                 // Simulate training
                 Thread.sleep(2000 + (long) (Math.random() * 3000));
+
+                // Check again after training
+                if (!runningJobs.containsKey(jobId)) {
+                    markJobStopped(jobId);
+                    return;
+                }
 
                 // Generate mock results
                 double score = generateMockScore(job.getProblemType(), algorithm);
@@ -183,6 +224,9 @@ public class AutoMLService {
                 );
                 leaderboard.add(entry);
 
+                // Refresh and update
+                job = autoMLJobRepository.findById(jobId).orElseThrow();
+                
                 if (score > bestScore) {
                     bestScore = score;
                     bestAlgorithm = algorithm;
@@ -199,9 +243,10 @@ public class AutoMLService {
             }
 
             // Sort leaderboard by score
+            final ProblemType pt = job.getProblemType();
             leaderboard.sort((a, b) -> {
-                double scoreA = job.getProblemType() == ProblemType.REGRESSION ? (a.getR2() != null ? a.getR2() : 0) : (a.getAccuracy() != null ? a.getAccuracy() : 0);
-                double scoreB = job.getProblemType() == ProblemType.REGRESSION ? (b.getR2() != null ? b.getR2() : 0) : (b.getAccuracy() != null ? b.getAccuracy() : 0);
+                double scoreA = pt == ProblemType.REGRESSION ? (a.getR2() != null ? a.getR2() : 0) : (a.getAccuracy() != null ? a.getAccuracy() : 0);
+                double scoreB = pt == ProblemType.REGRESSION ? (b.getR2() != null ? b.getR2() : 0) : (b.getAccuracy() != null ? b.getAccuracy() : 0);
                 return Double.compare(scoreB, scoreA);
             });
 
@@ -210,14 +255,29 @@ public class AutoMLService {
                 leaderboard.get(i).setRank(i + 1);
             }
 
-            // Phase 4: Evaluation
+            // Phase 4: Model Training (best model)
+            job = autoMLJobRepository.findById(jobId).orElseThrow();
+            job.setCurrentPhase("MODEL_TRAINING");
+            job.setProgress(88);
+            addLog(job, "INFO", "Training final model with " + bestAlgorithm);
+            autoMLJobRepository.save(job);
+            Thread.sleep(2000);
+
+            // Phase 5: Evaluation
+            if (!runningJobs.containsKey(jobId)) {
+                markJobStopped(jobId);
+                return;
+            }
+            
+            job = autoMLJobRepository.findById(jobId).orElseThrow();
             job.setCurrentPhase("EVALUATION");
-            job.setProgress(90);
+            job.setProgress(95);
             addLog(job, "INFO", "Running final evaluation on best model");
             autoMLJobRepository.save(job);
             Thread.sleep(2000);
 
-            // Phase 5: Complete
+            // Phase 6: Complete
+            job = autoMLJobRepository.findById(jobId).orElseThrow();
             job.setStatus(JobStatus.COMPLETED);
             job.setCurrentPhase("COMPLETED");
             job.setProgress(100);
@@ -235,23 +295,48 @@ public class AutoMLService {
             autoMLJobRepository.save(job);
 
             runningJobs.remove(jobId);
-            return CompletableFuture.completedFuture(null);
+            log.info("AutoML job completed successfully: {}", jobId);
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.warn("AutoML job interrupted: {}", jobId);
-            return CompletableFuture.completedFuture(null);
+            markJobStopped(jobId);
         } catch (Exception e) {
             log.error("AutoML job failed: {}", jobId, e);
-            AutoMLJob job = autoMLJobRepository.findById(jobId).orElse(null);
-            if (job != null) {
-                job.setStatus(JobStatus.FAILED);
-                job.setErrorMessage(e.getMessage());
-                addLog(job, "ERROR", "Job failed: " + e.getMessage());
-                autoMLJobRepository.save(job);
+            try {
+                AutoMLJob job = autoMLJobRepository.findById(jobId).orElse(null);
+                if (job != null) {
+                    job.setStatus(JobStatus.FAILED);
+                    job.setErrorMessage(e.getMessage());
+                    addLog(job, "ERROR", "Job failed: " + e.getMessage());
+                    autoMLJobRepository.save(job);
+                }
+            } catch (Exception ex) {
+                log.error("Failed to update job status", ex);
             }
             runningJobs.remove(jobId);
-            return CompletableFuture.completedFuture(null);
+        }
+    }
+    
+    /**
+     * Mark job as stopped.
+     */
+    private void markJobStopped(String jobId) {
+        try {
+            AutoMLJob job = autoMLJobRepository.findById(jobId).orElse(null);
+            if (job != null && job.getStatus() != JobStatus.STOPPED) {
+                job.setStatus(JobStatus.STOPPED);
+                job.setCompletedAt(LocalDateTime.now());
+                if (job.getStartedAt() != null) {
+                    job.setElapsedTimeSeconds(
+                        java.time.Duration.between(job.getStartedAt(), job.getCompletedAt()).getSeconds()
+                    );
+                }
+                addLog(job, "WARN", "Job stopped");
+                autoMLJobRepository.save(job);
+            }
+        } catch (Exception e) {
+            log.error("Failed to mark job as stopped: {}", jobId, e);
         }
     }
 
@@ -392,7 +477,10 @@ public class AutoMLService {
         }
 
         // Remove from running jobs (will trigger stop in async method)
-        runningJobs.remove(jobId);
+        CompletableFuture<?> future = runningJobs.remove(jobId);
+        if (future != null) {
+            future.cancel(true);
+        }
 
         job.setStatus(JobStatus.STOPPED);
         job.setCompletedAt(LocalDateTime.now());
@@ -421,8 +509,9 @@ public class AutoMLService {
                 .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
 
         // Stop if running
-        if (runningJobs.containsKey(jobId)) {
-            runningJobs.remove(jobId);
+        CompletableFuture<?> future = runningJobs.remove(jobId);
+        if (future != null) {
+            future.cancel(true);
         }
 
         autoMLJobRepository.delete(job);
