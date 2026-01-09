@@ -347,7 +347,7 @@ public class PredictionService {
 
         Page<Prediction> predictionPage;
         if (projectId != null) {
-            predictionPage = predictionRepository.findByModel_Project_Id(projectId, pageRequest);
+            predictionPage = predictionRepository.findByProjectId(projectId, pageRequest);
         } else {
             predictionPage = predictionRepository.findAll(pageRequest);
         }

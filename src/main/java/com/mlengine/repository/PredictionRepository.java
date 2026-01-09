@@ -41,7 +41,7 @@ public interface PredictionRepository extends JpaRepository<Prediction, String> 
 
     List<Prediction> findTop10ByOrderByCreatedAtDesc();
 
-    Page<Prediction> findByModel_Project_Id(String projectId, Pageable pageable);
+    Page<Prediction> findByProjectId(String projectId, Pageable pageable);
 
     long countByCreatedAtAfter(LocalDateTime since);
 }
