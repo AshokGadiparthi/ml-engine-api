@@ -7,6 +7,9 @@ server:
 spring:
   application:
     name: ml-engine-api
+  jackson:
+    mapper:
+      accept-case-insensitive-enums: true
     
   # File Upload
   servlet:
