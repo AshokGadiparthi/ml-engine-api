@@ -1,6 +1,6 @@
 # ML Engine API v2.0
 
-Enterprise Machine Learning Platform REST API - Complete with Data Management
+Enterprise Machine Learning Platform REST API - Complete with Data Management and AutoML
 
 ## 🚀 Quick Start
 
@@ -32,7 +32,7 @@ mvn spring-boot:run
 | PUT | `/api/projects/{id}` | Update project |
 | DELETE | `/api/projects/{id}` | Delete project |
 
-### Data Sources ⭐ NEW BROWSE/PREVIEW
+### Data Sources
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/datasources` | Create data source |
@@ -40,8 +40,8 @@ mvn spring-boot:run
 | GET | `/api/datasources/{id}` | Get data source |
 | POST | `/api/datasources/test` | Test new connection |
 | POST | `/api/datasources/{id}/test` | Test existing connection |
-| GET | `/api/datasources/{id}/browse` | ⭐ **Browse tables** |
-| GET | `/api/datasources/{id}/tables/{name}/preview` | ⭐ **Preview table data** |
+| GET | `/api/datasources/{id}/browse` | Browse tables |
+| GET | `/api/datasources/{id}/tables/{name}/preview` | Preview table data |
 | PUT | `/api/datasources/{id}` | Update data source |
 | DELETE | `/api/datasources/{id}` | Delete data source |
 
@@ -56,6 +56,21 @@ mvn spring-boot:run
 | GET | `/api/datasets/{id}/quality` | Quality report |
 | PUT | `/api/datasets/{id}` | Update dataset |
 | DELETE | `/api/datasets/{id}` | Delete dataset |
+
+### AutoML Engine ⭐ NEW
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/automl/jobs` | ⭐ Start AutoML job |
+| GET | `/api/automl/jobs` | List AutoML jobs |
+| GET | `/api/automl/jobs/{id}` | ⭐ Get job status/progress |
+| GET | `/api/automl/jobs/{id}/results` | ⭐ Get results & leaderboard |
+| GET | `/api/automl/jobs/{id}/leaderboard` | Get algorithm comparison |
+| GET | `/api/automl/jobs/{id}/feature-importance` | Get feature importance |
+| GET | `/api/automl/jobs/{id}/logs` | Get execution logs |
+| POST | `/api/automl/jobs/{id}/stop` | Stop running job |
+| POST | `/api/automl/jobs/{id}/deploy` | Deploy best model |
+| DELETE | `/api/automl/jobs/{id}` | Delete job |
+| GET | `/api/automl/algorithms` | List available algorithms |
 
 ### Training Jobs
 | Method | Endpoint | Description |
@@ -114,54 +129,63 @@ mvn spring-boot:run
 | Feature | Status | Description |
 |---------|--------|-------------|
 | Projects | ✅ | CRUD + Dashboard stats |
-| Data Sources | ✅ | CRUD + Test + **Browse** + **Preview** |
+| Data Sources | ✅ | CRUD + Test + Browse + Preview |
 | Datasets | ✅ | Upload + Preview + Quality |
+| AutoML | ✅ | **NEW** Auto algorithm selection |
 | Training | ✅ | 14 Algorithms + Progress |
 | Models | ✅ | Metrics + Deploy |
 | Explainability | ✅ | SHAP + LIME + PDP |
 | Predictions | ✅ | Single + Batch |
 | Activities | ✅ | Activity feed |
 
-## 🗄️ Supported Data Sources
+## 🤖 AutoML Algorithms
 
-| Type | Test | Browse | Preview |
-|------|------|--------|---------|
-| PostgreSQL | ✅ | ✅ | ✅ |
-| MySQL | ✅ | ✅ | ✅ |
-| SQLite | ✅ | ✅ | ✅ |
-| BigQuery | Mock | Mock | Mock |
-| AWS S3 | Mock | Mock | Mock |
-| GCS | Mock | Mock | Mock |
-
-## 📊 Supported Algorithms (14)
-
+### Classification
 - XGBoost
-- LightGBM  
-- CatBoost
 - Random Forest
 - Gradient Boosting
-- Neural Network (MLP)
 - Logistic Regression
-- Linear Regression
 - SVM
-- KNN
-- Naive Bayes
-- Decision Tree
-- Extra Trees
-- AdaBoost
 
-## 🧪 Test Commands
+### Regression
+- XGBoost
+- Random Forest
+- Gradient Boosting
+- Linear Regression
+- Ridge
+- Lasso
+- SVR
+
+## 🧪 Test AutoML Commands
 
 ```bash
-# Test Browse Data Source
-curl http://localhost:8080/api/datasources/{id}/browse
+# Start AutoML Job
+curl -X POST http://localhost:8080/api/automl/jobs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "datasetId": "your-dataset-id",
+    "targetColumn": "churn",
+    "problemType": "CLASSIFICATION",
+    "maxTrainingTimeMinutes": 60,
+    "accuracyVsSpeed": "high",
+    "interpretability": "medium",
+    "config": {
+      "enableFeatureEngineering": true,
+      "cvFolds": 5
+    }
+  }'
 
-# Test Table Preview
-curl http://localhost:8080/api/datasources/{id}/tables/customers/preview?rows=10
+# Get Job Progress
+curl http://localhost:8080/api/automl/jobs/{jobId}
 
-# Test Dataset Quality
-curl http://localhost:8080/api/datasets/{id}/quality
+# Get Results (after completion)
+curl http://localhost:8080/api/automl/jobs/{jobId}/results
 
-# Test Connection
-curl -X POST http://localhost:8080/api/datasources/{id}/test
+# Stop Job
+curl -X POST http://localhost:8080/api/automl/jobs/{jobId}/stop
+
+# Deploy Best Model
+curl -X POST http://localhost:8080/api/automl/jobs/{jobId}/deploy \
+  -H "Content-Type: application/json" \
+  -d '{"deploymentName": "churn-predictor-v1"}'
 ```

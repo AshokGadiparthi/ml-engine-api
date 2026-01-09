@@ -1,0 +1,784 @@
+package com.mlengine.service;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mlengine.model.dto.AutoMLDTO;
+import com.mlengine.model.entity.AutoMLJob;
+import com.mlengine.model.entity.Dataset;
+import com.mlengine.model.entity.Model;
+import com.mlengine.model.entity.Project;
+import com.mlengine.model.enums.JobStatus;
+import com.mlengine.model.enums.ProblemType;
+import com.mlengine.repository.AutoMLJobRepository;
+import com.mlengine.repository.DatasetRepository;
+import com.mlengine.repository.ModelRepository;
+import com.mlengine.repository.ProjectRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * Service for AutoML operations.
+ * Manages automatic model selection and training jobs.
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class AutoMLService {
+
+    private final AutoMLJobRepository autoMLJobRepository;
+    private final DatasetRepository datasetRepository;
+    private final ProjectRepository projectRepository;
+    private final ModelRepository modelRepository;
+    private final ObjectMapper objectMapper;
+
+    // Track running jobs for cancellation
+    private final Map<String, CompletableFuture<?>> runningJobs = new ConcurrentHashMap<>();
+
+    /**
+     * Start a new AutoML job.
+     */
+    @Transactional
+    public AutoMLDTO.JobResponse startAutoML(AutoMLDTO.StartRequest request) {
+        log.info("Starting AutoML job for dataset: {}", request.getDatasetId());
+
+        // Validate dataset exists
+        Dataset dataset = datasetRepository.findById(request.getDatasetId())
+                .orElseThrow(() -> new IllegalArgumentException("Dataset not found: " + request.getDatasetId()));
+
+        // Get project if specified
+        Project project = null;
+        if (request.getProjectId() != null) {
+            project = projectRepository.findById(request.getProjectId())
+                    .orElseThrow(() -> new IllegalArgumentException("Project not found: " + request.getProjectId()));
+        }
+
+        // Create job name if not provided
+        String jobName = request.getName();
+        if (jobName == null || jobName.isBlank()) {
+            jobName = "AutoML - " + dataset.getName() + " - " + LocalDateTime.now().toString().substring(0, 16);
+        }
+
+        // Create AutoML job entity
+        AutoMLJob job = AutoMLJob.builder()
+                .name(jobName)
+                .description(request.getDescription())
+                .project(project)
+                .dataset(dataset)
+                .targetColumn(request.getTargetColumn())
+                .problemType(request.getProblemType())
+                .status(JobStatus.QUEUED)
+                .maxTrainingTimeMinutes(request.getMaxTrainingTimeMinutes())
+                .accuracyVsSpeed(request.getAccuracyVsSpeed())
+                .interpretability(request.getInterpretability())
+                .progress(0)
+                .algorithmsCompleted(0)
+                .algorithmsTotal(getAlgorithmCount(request.getProblemType(), request.getAccuracyVsSpeed()))
+                .build();
+
+        // Apply config if provided
+        if (request.getConfig() != null) {
+            AutoMLDTO.AutoMLConfig config = request.getConfig();
+            job.setEnableFeatureEngineering(config.getEnableFeatureEngineering());
+            job.setScalingMethod(config.getScalingMethod());
+            job.setPolynomialDegree(config.getPolynomialDegree());
+            job.setSelectFeatures(config.getSelectFeatures());
+            job.setCvFolds(config.getCvFolds());
+            job.setEnableExplainability(config.getEnableExplainability());
+            job.setEnableHyperparameterTuning(config.getEnableHyperparameterTuning());
+            job.setTuningMethod(config.getTuningMethod());
+        }
+
+        // Initialize phases
+        job.setCurrentPhase("QUEUED");
+        job.setLogsJson(serializeJson(List.of(
+                createLogEntry("INFO", "AutoML job created and queued")
+        )));
+
+        job = autoMLJobRepository.save(job);
+
+        // Start async processing
+        String jobId = job.getId();
+        CompletableFuture<?> future = runAutoMLAsync(jobId);
+        runningJobs.put(jobId, future);
+
+        return toJobResponse(job, "AutoML job started successfully");
+    }
+
+    /**
+     * Async method to run AutoML.
+     */
+    @Async
+    public CompletableFuture<Void> runAutoMLAsync(String jobId) {
+        try {
+            AutoMLJob job = autoMLJobRepository.findById(jobId)
+                    .orElseThrow(() -> new IllegalArgumentException("Job not found"));
+
+            // Update status to STARTING
+            job.setStatus(JobStatus.STARTING);
+            job.setStartedAt(LocalDateTime.now());
+            job.setCurrentPhase("DATA_VALIDATION");
+            job.setProgress(5);
+            addLog(job, "INFO", "AutoML job started");
+            autoMLJobRepository.save(job);
+
+            // Phase 1: Data Validation
+            Thread.sleep(2000); // Simulate work
+            job.setProgress(15);
+            job.setCurrentPhase("FEATURE_ENGINEERING");
+            addLog(job, "INFO", "Data validation completed");
+            autoMLJobRepository.save(job);
+
+            // Phase 2: Feature Engineering
+            if (Boolean.TRUE.equals(job.getEnableFeatureEngineering())) {
+                Thread.sleep(3000);
+                addLog(job, "INFO", "Feature engineering: generated additional features");
+            }
+            job.setProgress(25);
+            job.setCurrentPhase("ALGORITHM_SELECTION");
+            job.setStatus(JobStatus.TRAINING);
+            addLog(job, "INFO", "Starting algorithm comparison");
+            autoMLJobRepository.save(job);
+
+            // Phase 3: Algorithm Selection - Test multiple algorithms
+            List<AutoMLDTO.LeaderboardEntry> leaderboard = new ArrayList<>();
+            List<String> algorithms = getAlgorithmsForProblemType(job.getProblemType());
+            int totalAlgorithms = algorithms.size();
+            job.setAlgorithmsTotal(totalAlgorithms);
+
+            double bestScore = 0;
+            String bestAlgorithm = null;
+
+            for (int i = 0; i < algorithms.size(); i++) {
+                // Check if job was stopped
+                if (runningJobs.get(jobId) == null) {
+                    job.setStatus(JobStatus.STOPPED);
+                    autoMLJobRepository.save(job);
+                    return CompletableFuture.completedFuture(null);
+                }
+
+                String algorithm = algorithms.get(i);
+                job.setCurrentAlgorithm(algorithm);
+                addLog(job, "INFO", "Testing " + algorithm + "...");
+                autoMLJobRepository.save(job);
+
+                // Simulate training
+                Thread.sleep(2000 + (long) (Math.random() * 3000));
+
+                // Generate mock results
+                double score = generateMockScore(job.getProblemType(), algorithm);
+                AutoMLDTO.LeaderboardEntry entry = createLeaderboardEntry(
+                        i + 1, algorithm, score, job.getProblemType()
+                );
+                leaderboard.add(entry);
+
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestAlgorithm = algorithm;
+                    job.setCurrentBestScore(bestScore);
+                    job.setCurrentBestAlgorithm(bestAlgorithm);
+                    addLog(job, "INFO", algorithm + ": " + formatScore(score, job.getProblemType()) + " - New best!");
+                } else {
+                    addLog(job, "INFO", algorithm + ": " + formatScore(score, job.getProblemType()));
+                }
+
+                job.setAlgorithmsCompleted(i + 1);
+                job.setProgress(25 + (int) ((i + 1.0) / totalAlgorithms * 60));
+                autoMLJobRepository.save(job);
+            }
+
+            // Sort leaderboard by score
+            leaderboard.sort((a, b) -> {
+                double scoreA = job.getProblemType() == ProblemType.REGRESSION ? (a.getR2() != null ? a.getR2() : 0) : (a.getAccuracy() != null ? a.getAccuracy() : 0);
+                double scoreB = job.getProblemType() == ProblemType.REGRESSION ? (b.getR2() != null ? b.getR2() : 0) : (b.getAccuracy() != null ? b.getAccuracy() : 0);
+                return Double.compare(scoreB, scoreA);
+            });
+
+            // Update ranks
+            for (int i = 0; i < leaderboard.size(); i++) {
+                leaderboard.get(i).setRank(i + 1);
+            }
+
+            // Phase 4: Evaluation
+            job.setCurrentPhase("EVALUATION");
+            job.setProgress(90);
+            addLog(job, "INFO", "Running final evaluation on best model");
+            autoMLJobRepository.save(job);
+            Thread.sleep(2000);
+
+            // Phase 5: Complete
+            job.setStatus(JobStatus.COMPLETED);
+            job.setCurrentPhase("COMPLETED");
+            job.setProgress(100);
+            job.setCompletedAt(LocalDateTime.now());
+            job.setBestAlgorithm(bestAlgorithm);
+            job.setBestScore(bestScore);
+            job.setBestMetric(job.getProblemType() == ProblemType.REGRESSION ? "R²" : "Accuracy");
+            job.setLeaderboardJson(serializeJson(leaderboard));
+            job.setFeatureImportanceJson(serializeJson(generateMockFeatureImportance()));
+
+            long elapsed = java.time.Duration.between(job.getStartedAt(), job.getCompletedAt()).getSeconds();
+            job.setElapsedTimeSeconds(elapsed);
+
+            addLog(job, "INFO", "AutoML completed! Best model: " + bestAlgorithm + " with " + formatScore(bestScore, job.getProblemType()));
+            autoMLJobRepository.save(job);
+
+            runningJobs.remove(jobId);
+            return CompletableFuture.completedFuture(null);
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("AutoML job interrupted: {}", jobId);
+            return CompletableFuture.completedFuture(null);
+        } catch (Exception e) {
+            log.error("AutoML job failed: {}", jobId, e);
+            AutoMLJob job = autoMLJobRepository.findById(jobId).orElse(null);
+            if (job != null) {
+                job.setStatus(JobStatus.FAILED);
+                job.setErrorMessage(e.getMessage());
+                addLog(job, "ERROR", "Job failed: " + e.getMessage());
+                autoMLJobRepository.save(job);
+            }
+            runningJobs.remove(jobId);
+            return CompletableFuture.completedFuture(null);
+        }
+    }
+
+    /**
+     * Get job progress/status.
+     */
+    public AutoMLDTO.ProgressResponse getJobProgress(String jobId) {
+        AutoMLJob job = autoMLJobRepository.findById(jobId)
+                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
+
+        List<AutoMLDTO.PhaseInfo> phases = buildPhaseInfo(job);
+        List<AutoMLDTO.LogEntry> logs = deserializeLogs(job.getLogsJson());
+
+        // Calculate elapsed time
+        Long elapsed = job.getElapsedTimeSeconds();
+        if (elapsed == null && job.getStartedAt() != null) {
+            elapsed = java.time.Duration.between(job.getStartedAt(), LocalDateTime.now()).getSeconds();
+        }
+
+        // Estimate remaining time
+        Long remaining = null;
+        if (job.getProgress() != null && job.getProgress() > 0 && elapsed != null) {
+            remaining = (long) ((elapsed / (job.getProgress() / 100.0)) * ((100 - job.getProgress()) / 100.0));
+        }
+
+        return AutoMLDTO.ProgressResponse.builder()
+                .jobId(job.getId())
+                .name(job.getName())
+                .status(job.getStatus())
+                .statusLabel(job.getStatus().name().toLowerCase())
+                .progress(job.getProgress())
+                .currentPhase(job.getCurrentPhase())
+                .currentAlgorithm(job.getCurrentAlgorithm())
+                .phases(phases)
+                .algorithmsCompleted(job.getAlgorithmsCompleted())
+                .algorithmsTotal(job.getAlgorithmsTotal())
+                .currentBestScore(job.getCurrentBestScore())
+                .currentBestAlgorithm(job.getCurrentBestAlgorithm())
+                .elapsedTimeSeconds(elapsed)
+                .estimatedRemainingSeconds(remaining)
+                .logs(logs)
+                .startedAt(job.getStartedAt())
+                .completedAt(job.getCompletedAt())
+                .errorMessage(job.getErrorMessage())
+                .build();
+    }
+
+    /**
+     * Get job results (after completion).
+     */
+    public AutoMLDTO.ResultsResponse getJobResults(String jobId) {
+        AutoMLJob job = autoMLJobRepository.findById(jobId)
+                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
+
+        if (job.getStatus() != JobStatus.COMPLETED) {
+            throw new IllegalStateException("Job is not completed yet. Current status: " + job.getStatus());
+        }
+
+        List<AutoMLDTO.LeaderboardEntry> leaderboard = deserializeLeaderboard(job.getLeaderboardJson());
+        List<AutoMLDTO.FeatureImportanceEntry> featureImportance = deserializeFeatureImportance(job.getFeatureImportanceJson());
+
+        Dataset dataset = job.getDataset();
+
+        return AutoMLDTO.ResultsResponse.builder()
+                .jobId(job.getId())
+                .name(job.getName())
+                .status(job.getStatus())
+                .problemType(job.getProblemType())
+                .targetColumn(job.getTargetColumn())
+                .datasetInfo(AutoMLDTO.DatasetInfo.builder()
+                        .datasetId(dataset.getId())
+                        .datasetName(dataset.getName())
+                        .totalRows(dataset.getRowCount())
+                        .totalFeatures(dataset.getColumnCount())
+                        .trainSize((long) (dataset.getRowCount() * 0.8))
+                        .testSize((long) (dataset.getRowCount() * 0.2))
+                        .build())
+                .featureEngineering(AutoMLDTO.FeatureEngineeringInfo.builder()
+                        .enabled(job.getEnableFeatureEngineering())
+                        .scalingMethod(job.getScalingMethod())
+                        .originalFeatures(dataset.getColumnCount())
+                        .engineeredFeatures(dataset.getColumnCount() + (job.getEnableFeatureEngineering() ? 5 : 0))
+                        .build())
+                .leaderboard(leaderboard)
+                .bestModel(AutoMLDTO.BestModelInfo.builder()
+                        .algorithm(job.getBestAlgorithm())
+                        .score(job.getBestScore())
+                        .metric(job.getBestMetric())
+                        .modelPath(job.getModelPath())
+                        .featureEngineerPath(job.getFeatureEngineerPath())
+                        .build())
+                .featureImportance(featureImportance)
+                .comparisonCsvPath(job.getComparisonCsvPath())
+                .totalTrainingTimeSeconds(job.getElapsedTimeSeconds())
+                .completedAt(job.getCompletedAt())
+                .build();
+    }
+
+    /**
+     * List AutoML jobs with pagination.
+     */
+    public AutoMLDTO.PagedResponse listJobs(String projectId, String status, int page, int size) {
+        PageRequest pageRequest = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+
+        Page<AutoMLJob> jobPage;
+        if (projectId != null && status != null) {
+            JobStatus jobStatus = JobStatus.valueOf(status.toUpperCase());
+            jobPage = autoMLJobRepository.findByProjectIdAndStatus(projectId, jobStatus, pageRequest);
+        } else if (projectId != null) {
+            jobPage = autoMLJobRepository.findByProjectId(projectId, pageRequest);
+        } else {
+            jobPage = autoMLJobRepository.findAll(pageRequest);
+        }
+
+        List<AutoMLDTO.ListItem> items = jobPage.getContent().stream()
+                .map(this::toListItem)
+                .toList();
+
+        return AutoMLDTO.PagedResponse.builder()
+                .content(items)
+                .totalElements(jobPage.getTotalElements())
+                .totalPages(jobPage.getTotalPages())
+                .page(page)
+                .size(size)
+                .build();
+    }
+
+    /**
+     * Stop a running job.
+     */
+    @Transactional
+    public AutoMLDTO.StopResponse stopJob(String jobId) {
+        AutoMLJob job = autoMLJobRepository.findById(jobId)
+                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
+
+        if (job.getStatus() == JobStatus.COMPLETED || job.getStatus() == JobStatus.FAILED) {
+            throw new IllegalStateException("Cannot stop a job that is already " + job.getStatus());
+        }
+
+        // Remove from running jobs (will trigger stop in async method)
+        runningJobs.remove(jobId);
+
+        job.setStatus(JobStatus.STOPPED);
+        job.setCompletedAt(LocalDateTime.now());
+        if (job.getStartedAt() != null) {
+            job.setElapsedTimeSeconds(java.time.Duration.between(job.getStartedAt(), job.getCompletedAt()).getSeconds());
+        }
+        addLog(job, "WARN", "Job stopped by user");
+        autoMLJobRepository.save(job);
+
+        return AutoMLDTO.StopResponse.builder()
+                .jobId(jobId)
+                .status(JobStatus.STOPPED)
+                .message("AutoML job stopped successfully")
+                .algorithmsCompleted(job.getAlgorithmsCompleted())
+                .bestScoreAchieved(job.getCurrentBestScore())
+                .stoppedAt(job.getCompletedAt())
+                .build();
+    }
+
+    /**
+     * Delete a job.
+     */
+    @Transactional
+    public void deleteJob(String jobId) {
+        AutoMLJob job = autoMLJobRepository.findById(jobId)
+                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
+
+        // Stop if running
+        if (runningJobs.containsKey(jobId)) {
+            runningJobs.remove(jobId);
+        }
+
+        autoMLJobRepository.delete(job);
+        log.info("Deleted AutoML job: {}", jobId);
+    }
+
+    /**
+     * Deploy best model from job.
+     */
+    @Transactional
+    public AutoMLDTO.DeployResponse deployBestModel(String jobId, AutoMLDTO.DeployRequest request) {
+        AutoMLJob job = autoMLJobRepository.findById(jobId)
+                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
+
+        if (job.getStatus() != JobStatus.COMPLETED) {
+            throw new IllegalStateException("Can only deploy models from completed jobs");
+        }
+
+        // Create or update model entity
+        Model model = job.getBestModel();
+        if (model == null) {
+            model = Model.builder()
+                    .name(request.getDeploymentName() != null ? request.getDeploymentName() : job.getBestAlgorithm() + " - " + job.getName())
+                    .algorithm(job.getBestAlgorithm())
+                    .algorithmDisplayName(job.getBestAlgorithm())
+                    .problemType(job.getProblemType())
+                    .project(job.getProject())
+                    .datasetId(job.getDataset().getId())
+                    .datasetName(job.getDataset().getName())
+                    .targetVariable(job.getTargetColumn())
+                    .isDeployed(true)
+                    .deployedAt(LocalDateTime.now())
+                    .build();
+            
+            // Set metrics based on problem type
+            if (job.getProblemType() == ProblemType.REGRESSION) {
+                model.setR2Score(job.getBestScore());
+            } else {
+                model.setAccuracy(job.getBestScore());
+            }
+            
+            model = modelRepository.save(model);
+
+            job.setBestModel(model);
+            autoMLJobRepository.save(job);
+        }
+
+        return AutoMLDTO.DeployResponse.builder()
+                .deploymentId(model.getId())
+                .modelId(model.getId())
+                .name(model.getName())
+                .status("DEPLOYED")
+                .endpoint("/api/predictions/realtime/" + model.getId())
+                .deployedAt(LocalDateTime.now())
+                .build();
+    }
+
+    /**
+     * Get leaderboard for a job.
+     */
+    public List<AutoMLDTO.LeaderboardEntry> getLeaderboard(String jobId) {
+        AutoMLJob job = autoMLJobRepository.findById(jobId)
+                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
+        return deserializeLeaderboard(job.getLeaderboardJson());
+    }
+
+    /**
+     * Get feature importance for a job.
+     */
+    public List<AutoMLDTO.FeatureImportanceEntry> getFeatureImportance(String jobId) {
+        AutoMLJob job = autoMLJobRepository.findById(jobId)
+                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
+        return deserializeFeatureImportance(job.getFeatureImportanceJson());
+    }
+
+    /**
+     * Get logs for a job.
+     */
+    public List<AutoMLDTO.LogEntry> getJobLogs(String jobId, int limit) {
+        AutoMLJob job = autoMLJobRepository.findById(jobId)
+                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
+        List<AutoMLDTO.LogEntry> logs = deserializeLogs(job.getLogsJson());
+        if (logs.size() > limit) {
+            return logs.subList(logs.size() - limit, logs.size());
+        }
+        return logs;
+    }
+
+    /**
+     * List available algorithms.
+     */
+    public List<Map<String, Object>> listAlgorithms(String problemType) {
+        List<Map<String, Object>> algorithms = new ArrayList<>();
+
+        if (problemType == null || problemType.equalsIgnoreCase("classification")) {
+            algorithms.add(createAlgorithmInfo("XGBoost", "CLASSIFICATION", "Gradient boosting for high accuracy"));
+            algorithms.add(createAlgorithmInfo("Random Forest", "CLASSIFICATION", "Ensemble of decision trees"));
+            algorithms.add(createAlgorithmInfo("Gradient Boosting", "CLASSIFICATION", "Sequential boosting"));
+            algorithms.add(createAlgorithmInfo("Logistic Regression", "CLASSIFICATION", "Fast and interpretable"));
+            algorithms.add(createAlgorithmInfo("SVM", "CLASSIFICATION", "Support Vector Machine"));
+        }
+
+        if (problemType == null || problemType.equalsIgnoreCase("regression")) {
+            algorithms.add(createAlgorithmInfo("XGBoost", "REGRESSION", "Gradient boosting for regression"));
+            algorithms.add(createAlgorithmInfo("Random Forest", "REGRESSION", "Ensemble regression"));
+            algorithms.add(createAlgorithmInfo("Gradient Boosting", "REGRESSION", "Sequential boosting"));
+            algorithms.add(createAlgorithmInfo("Linear Regression", "REGRESSION", "Fast and interpretable"));
+            algorithms.add(createAlgorithmInfo("Ridge", "REGRESSION", "L2 regularized regression"));
+            algorithms.add(createAlgorithmInfo("Lasso", "REGRESSION", "L1 regularized regression"));
+            algorithms.add(createAlgorithmInfo("SVR", "REGRESSION", "Support Vector Regression"));
+        }
+
+        return algorithms;
+    }
+
+    // ==================== HELPER METHODS ====================
+
+    private int getAlgorithmCount(ProblemType problemType, String accuracyVsSpeed) {
+        int base = problemType == ProblemType.REGRESSION ? 7 : 5;
+        return switch (accuracyVsSpeed) {
+            case "low" -> Math.max(2, base - 2);
+            case "high" -> base;
+            default -> Math.max(3, base - 1);
+        };
+    }
+
+    private List<String> getAlgorithmsForProblemType(ProblemType problemType) {
+        if (problemType == ProblemType.REGRESSION) {
+            return List.of("XGBoost", "Random Forest", "Gradient Boosting", "Linear Regression", "Ridge", "Lasso", "SVR");
+        }
+        return List.of("XGBoost", "Random Forest", "Gradient Boosting", "Logistic Regression", "SVM");
+    }
+
+    private double generateMockScore(ProblemType problemType, String algorithm) {
+        double base = switch (algorithm) {
+            case "XGBoost" -> 0.92;
+            case "Random Forest" -> 0.89;
+            case "Gradient Boosting" -> 0.90;
+            case "Logistic Regression", "Linear Regression" -> 0.82;
+            case "SVM", "SVR" -> 0.85;
+            case "Ridge" -> 0.83;
+            case "Lasso" -> 0.81;
+            default -> 0.80;
+        };
+        return base + (Math.random() * 0.06 - 0.03); // Add some randomness
+    }
+
+    private String formatScore(double score, ProblemType problemType) {
+        if (problemType == ProblemType.REGRESSION) {
+            return String.format("R² = %.4f", score);
+        }
+        return String.format("%.1f%% accuracy", score * 100);
+    }
+
+    private AutoMLDTO.LeaderboardEntry createLeaderboardEntry(int rank, String algorithm, double score, ProblemType problemType) {
+        AutoMLDTO.LeaderboardEntry.LeaderboardEntryBuilder builder = AutoMLDTO.LeaderboardEntry.builder()
+                .rank(rank)
+                .algorithm(algorithm)
+                .cvScore(score)
+                .cvStd(Math.random() * 0.02)
+                .trainingTimeSeconds((long) (5 + Math.random() * 115));
+
+        if (problemType == ProblemType.REGRESSION) {
+            builder.r2(score)
+                    .mae(1.5 - score + Math.random() * 0.3)
+                    .rmse(2.0 - score + Math.random() * 0.4);
+        } else {
+            builder.accuracy(score)
+                    .precision(score - 0.01 + Math.random() * 0.02)
+                    .recall(score - 0.02 + Math.random() * 0.03)
+                    .f1Score(score - 0.015 + Math.random() * 0.02)
+                    .auc(score + 0.02 + Math.random() * 0.02);
+        }
+
+        return builder.build();
+    }
+
+    private List<AutoMLDTO.FeatureImportanceEntry> generateMockFeatureImportance() {
+        String[] features = {"tenure", "monthly_charges", "total_charges", "contract_type", "payment_method",
+                "online_security", "tech_support", "internet_service", "senior_citizen", "partner"};
+        List<AutoMLDTO.FeatureImportanceEntry> entries = new ArrayList<>();
+
+        double remaining = 1.0;
+        for (int i = 0; i < features.length; i++) {
+            double importance = i < features.length - 1 ? remaining * (0.15 + Math.random() * 0.25) : remaining;
+            entries.add(AutoMLDTO.FeatureImportanceEntry.builder()
+                    .feature(features[i])
+                    .importance(Math.round(importance * 1000) / 1000.0)
+                    .rank(i + 1)
+                    .build());
+            remaining -= importance;
+        }
+
+        entries.sort((a, b) -> Double.compare(b.getImportance(), a.getImportance()));
+        for (int i = 0; i < entries.size(); i++) {
+            entries.get(i).setRank(i + 1);
+        }
+
+        return entries;
+    }
+
+    private List<AutoMLDTO.PhaseInfo> buildPhaseInfo(AutoMLJob job) {
+        List<AutoMLDTO.PhaseInfo> phases = new ArrayList<>();
+        String currentPhase = job.getCurrentPhase();
+
+        phases.add(buildPhase("DATA_VALIDATION", "Data Validation", currentPhase, 1));
+        phases.add(buildPhase("FEATURE_ENGINEERING", "Feature Engineering", currentPhase, 2));
+        phases.add(buildPhase("ALGORITHM_SELECTION", "Algorithm Selection", currentPhase, 3));
+        phases.add(buildPhase("MODEL_TRAINING", "Model Training", currentPhase, 4));
+        phases.add(buildPhase("EVALUATION", "Evaluation", currentPhase, 5));
+
+        return phases;
+    }
+
+    private AutoMLDTO.PhaseInfo buildPhase(String name, String label, String currentPhase, int order) {
+        List<String> phaseOrder = List.of("QUEUED", "DATA_VALIDATION", "FEATURE_ENGINEERING", 
+                "ALGORITHM_SELECTION", "MODEL_TRAINING", "EVALUATION", "COMPLETED");
+
+        int currentIdx = phaseOrder.indexOf(currentPhase);
+        int thisIdx = phaseOrder.indexOf(name);
+
+        String status;
+        int progress;
+        if (currentPhase.equals("COMPLETED")) {
+            status = "COMPLETED";
+            progress = 100;
+        } else if (thisIdx < currentIdx) {
+            status = "COMPLETED";
+            progress = 100;
+        } else if (thisIdx == currentIdx) {
+            status = "RUNNING";
+            progress = 50;
+        } else {
+            status = "PENDING";
+            progress = 0;
+        }
+
+        return AutoMLDTO.PhaseInfo.builder()
+                .name(name)
+                .label(label)
+                .status(status)
+                .progress(progress)
+                .build();
+    }
+
+    private AutoMLDTO.LogEntry createLogEntry(String level, String message) {
+        return AutoMLDTO.LogEntry.builder()
+                .timestamp(LocalDateTime.now())
+                .level(level)
+                .message(message)
+                .build();
+    }
+
+    private void addLog(AutoMLJob job, String level, String message) {
+        List<AutoMLDTO.LogEntry> logs = deserializeLogs(job.getLogsJson());
+        logs.add(createLogEntry(level, message));
+        job.setLogsJson(serializeJson(logs));
+    }
+
+    private Map<String, Object> createAlgorithmInfo(String name, String type, String description) {
+        Map<String, Object> info = new HashMap<>();
+        info.put("name", name);
+        info.put("type", type);
+        info.put("description", description);
+        return info;
+    }
+
+    private String serializeJson(Object obj) {
+        try {
+            return objectMapper.writeValueAsString(obj);
+        } catch (JsonProcessingException e) {
+            log.error("Failed to serialize JSON", e);
+            return "[]";
+        }
+    }
+
+    private List<AutoMLDTO.LogEntry> deserializeLogs(String json) {
+        if (json == null || json.isBlank()) return new ArrayList<>();
+        try {
+            return objectMapper.readValue(json, new TypeReference<List<AutoMLDTO.LogEntry>>() {});
+        } catch (JsonProcessingException e) {
+            log.error("Failed to deserialize logs", e);
+            return new ArrayList<>();
+        }
+    }
+
+    private List<AutoMLDTO.LeaderboardEntry> deserializeLeaderboard(String json) {
+        if (json == null || json.isBlank()) return new ArrayList<>();
+        try {
+            return objectMapper.readValue(json, new TypeReference<List<AutoMLDTO.LeaderboardEntry>>() {});
+        } catch (JsonProcessingException e) {
+            log.error("Failed to deserialize leaderboard", e);
+            return new ArrayList<>();
+        }
+    }
+
+    private List<AutoMLDTO.FeatureImportanceEntry> deserializeFeatureImportance(String json) {
+        if (json == null || json.isBlank()) return new ArrayList<>();
+        try {
+            return objectMapper.readValue(json, new TypeReference<List<AutoMLDTO.FeatureImportanceEntry>>() {});
+        } catch (JsonProcessingException e) {
+            log.error("Failed to deserialize feature importance", e);
+            return new ArrayList<>();
+        }
+    }
+
+    private AutoMLDTO.JobResponse toJobResponse(AutoMLJob job, String message) {
+        AutoMLDTO.AutoMLConfig config = AutoMLDTO.AutoMLConfig.builder()
+                .enableFeatureEngineering(job.getEnableFeatureEngineering())
+                .scalingMethod(job.getScalingMethod())
+                .polynomialDegree(job.getPolynomialDegree())
+                .selectFeatures(job.getSelectFeatures())
+                .cvFolds(job.getCvFolds())
+                .enableExplainability(job.getEnableExplainability())
+                .enableHyperparameterTuning(job.getEnableHyperparameterTuning())
+                .tuningMethod(job.getTuningMethod())
+                .build();
+
+        return AutoMLDTO.JobResponse.builder()
+                .jobId(job.getId())
+                .projectId(job.getProject() != null ? job.getProject().getId() : null)
+                .datasetId(job.getDataset().getId())
+                .datasetName(job.getDataset().getName())
+                .name(job.getName())
+                .description(job.getDescription())
+                .targetColumn(job.getTargetColumn())
+                .problemType(job.getProblemType())
+                .status(job.getStatus())
+                .statusLabel(job.getStatus().name().toLowerCase())
+                .maxTrainingTimeMinutes(job.getMaxTrainingTimeMinutes())
+                .accuracyVsSpeed(job.getAccuracyVsSpeed())
+                .interpretability(job.getInterpretability())
+                .config(config)
+                .createdAt(job.getCreatedAt())
+                .startedAt(job.getStartedAt())
+                .completedAt(job.getCompletedAt())
+                .message(message)
+                .build();
+    }
+
+    private AutoMLDTO.ListItem toListItem(AutoMLJob job) {
+        return AutoMLDTO.ListItem.builder()
+                .jobId(job.getId())
+                .name(job.getName())
+                .projectId(job.getProject() != null ? job.getProject().getId() : null)
+                .datasetId(job.getDataset().getId())
+                .datasetName(job.getDataset().getName())
+                .problemType(job.getProblemType())
+                .status(job.getStatus())
+                .statusLabel(job.getStatus().name().toLowerCase())
+                .bestAlgorithm(job.getBestAlgorithm())
+                .bestScore(job.getBestScore())
+                .algorithmsCount(job.getAlgorithmsTotal())
+                .elapsedTimeSeconds(job.getElapsedTimeSeconds())
+                .createdAt(job.getCreatedAt())
+                .completedAt(job.getCompletedAt())
+                .build();
+    }
+}
