@@ -1,6 +1,6 @@
 # ML Engine API v2.0
 
-Enterprise Machine Learning Platform REST API - Complete (All 5 Phases + Data Management)
+Enterprise Machine Learning Platform REST API - Complete with Data Management
 
 ## 🚀 Quick Start
 
@@ -27,9 +27,12 @@ mvn spring-boot:run
 |--------|----------|-------------|
 | POST | `/api/projects` | Create project |
 | GET | `/api/projects` | List projects |
+| GET | `/api/projects/{id}` | Get project |
 | GET | `/api/projects/{id}/stats` | Dashboard stats |
+| PUT | `/api/projects/{id}` | Update project |
+| DELETE | `/api/projects/{id}` | Delete project |
 
-### Data Sources ⭐ UPDATED
+### Data Sources ⭐ NEW BROWSE/PREVIEW
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/datasources` | Create data source |
@@ -37,20 +40,20 @@ mvn spring-boot:run
 | GET | `/api/datasources/{id}` | Get data source |
 | POST | `/api/datasources/test` | Test new connection |
 | POST | `/api/datasources/{id}/test` | Test existing connection |
-| GET | `/api/datasources/{id}/browse` | ⭐ Browse tables |
-| GET | `/api/datasources/{id}/tables/{name}/preview` | ⭐ Preview table data |
+| GET | `/api/datasources/{id}/browse` | ⭐ **Browse tables** |
+| GET | `/api/datasources/{id}/tables/{name}/preview` | ⭐ **Preview table data** |
 | PUT | `/api/datasources/{id}` | Update data source |
 | DELETE | `/api/datasources/{id}` | Delete data source |
 
 ### Datasets
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/datasets` | Upload dataset |
+| POST | `/api/datasets` | Upload dataset (multipart) |
 | GET | `/api/datasets` | List datasets |
 | GET | `/api/datasets/{id}` | Get dataset |
 | GET | `/api/datasets/{id}/preview` | Preview data |
 | GET | `/api/datasets/{id}/columns` | Column info |
-| GET | `/api/datasets/{id}/quality` | ⭐ Quality report |
+| GET | `/api/datasets/{id}/quality` | Quality report |
 | PUT | `/api/datasets/{id}` | Update dataset |
 | DELETE | `/api/datasets/{id}` | Delete dataset |
 
@@ -58,6 +61,8 @@ mvn spring-boot:run
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/training/jobs` | Start training |
+| GET | `/api/training/jobs` | List jobs |
+| GET | `/api/training/jobs/{id}` | Get job |
 | GET | `/api/training/jobs/{id}/progress` | Job progress |
 | POST | `/api/training/jobs/{id}/stop` | Stop training |
 
@@ -65,12 +70,14 @@ mvn spring-boot:run
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/algorithms` | List 14 algorithms |
+| GET | `/api/algorithms/{id}` | Get algorithm |
 | GET | `/api/algorithms/{id}/params` | Hyperparameters |
 
 ### Models
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/models` | List models |
+| GET | `/api/models/{id}` | Get model |
 | GET | `/api/models/{id}/metrics` | All metrics |
 | GET | `/api/models/{id}/confusion-matrix` | Confusion matrix |
 | GET | `/api/models/{id}/roc-curve` | ROC curve |
@@ -102,22 +109,18 @@ mvn spring-boot:run
 | GET | `/api/activities` | List activities |
 | GET | `/api/activities/recent` | Recent activities |
 
-## ✅ All Phases Complete
+## ✅ All Features Complete
 
-| Phase | Status | Features |
-|-------|--------|----------|
-| Phase 1 | ✅ | Projects, Datasets, Data Sources |
-| Phase 2 | ✅ | Training Jobs, 14 Algorithms |
-| Phase 3 | ✅ | Models, Metrics, Evaluation |
-| Phase 4 | ✅ | SHAP, LIME, PDP, What-If |
-| Phase 5 | ✅ | Single & Batch Predictions |
-| Data Mgmt | ✅ | Browse, Test, Preview, Quality |
-
-## 📊 Supported Algorithms (14)
-
-XGBoost, LightGBM, CatBoost, Random Forest, Gradient Boosting,
-Neural Network (MLP), Logistic Regression, Linear Regression,
-SVM, KNN, Naive Bayes, Decision Tree, Extra Trees, AdaBoost
+| Feature | Status | Description |
+|---------|--------|-------------|
+| Projects | ✅ | CRUD + Dashboard stats |
+| Data Sources | ✅ | CRUD + Test + **Browse** + **Preview** |
+| Datasets | ✅ | Upload + Preview + Quality |
+| Training | ✅ | 14 Algorithms + Progress |
+| Models | ✅ | Metrics + Deploy |
+| Explainability | ✅ | SHAP + LIME + PDP |
+| Predictions | ✅ | Single + Batch |
+| Activities | ✅ | Activity feed |
 
 ## 🗄️ Supported Data Sources
 
@@ -129,3 +132,36 @@ SVM, KNN, Naive Bayes, Decision Tree, Extra Trees, AdaBoost
 | BigQuery | Mock | Mock | Mock |
 | AWS S3 | Mock | Mock | Mock |
 | GCS | Mock | Mock | Mock |
+
+## 📊 Supported Algorithms (14)
+
+- XGBoost
+- LightGBM  
+- CatBoost
+- Random Forest
+- Gradient Boosting
+- Neural Network (MLP)
+- Logistic Regression
+- Linear Regression
+- SVM
+- KNN
+- Naive Bayes
+- Decision Tree
+- Extra Trees
+- AdaBoost
+
+## 🧪 Test Commands
+
+```bash
+# Test Browse Data Source
+curl http://localhost:8080/api/datasources/{id}/browse
+
+# Test Table Preview
+curl http://localhost:8080/api/datasources/{id}/tables/customers/preview?rows=10
+
+# Test Dataset Quality
+curl http://localhost:8080/api/datasets/{id}/quality
+
+# Test Connection
+curl -X POST http://localhost:8080/api/datasources/{id}/test
+```
