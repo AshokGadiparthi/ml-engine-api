@@ -10,6 +10,7 @@ import java.nio.file.Path;
 
 /**
  * Configuration for ML Engine settings.
+ * Provides storage paths and Python configuration.
  */
 @Data
 @Configuration
@@ -27,6 +28,34 @@ public class MLEngineConfig {
         private String tempDir = "./storage/temp";
         private String exportsDir = "./storage/exports";
     }
+
+    // ============================================================
+    // CONVENIENCE METHODS - Direct access to storage paths
+    // ============================================================
+
+    public String getBaseDir() {
+        return storage.getBaseDir();
+    }
+
+    public String getDatasetsDir() {
+        return storage.getDatasetsDir();
+    }
+
+    public String getModelsDir() {
+        return storage.getModelsDir();
+    }
+
+    public String getTempDir() {
+        return storage.getTempDir();
+    }
+
+    public String getExportsDir() {
+        return storage.getExportsDir();
+    }
+
+    // ============================================================
+    // INITIALIZATION
+    // ============================================================
 
     @PostConstruct
     public void init() {
