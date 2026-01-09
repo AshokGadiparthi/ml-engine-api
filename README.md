@@ -1,6 +1,6 @@
 # ML Engine API v2.0
 
-Enterprise Machine Learning Platform REST API - Phases 1-4
+Enterprise Machine Learning Platform REST API - Complete (All 5 Phases)
 
 ## 🚀 Quick Start
 
@@ -9,7 +9,12 @@ mvn clean package -DskipTests
 mvn spring-boot:run
 ```
 
-## 📡 API Endpoints
+**URLs:**
+- API: http://localhost:8080/api
+- Swagger: http://localhost:8080/swagger-ui.html
+- H2 Console: http://localhost:8080/h2-console
+
+## 📡 Complete API Endpoints
 
 ### Health
 | Method | Endpoint | Description |
@@ -17,33 +22,34 @@ mvn spring-boot:run
 | GET | `/api` | API status |
 | GET | `/api/health` | Health check |
 
-### Projects (Phase 1)
+### Projects
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/projects` | Create project |
 | GET | `/api/projects` | List projects |
 | GET | `/api/projects/{id}/stats` | Dashboard stats |
 
-### Datasets (Phase 1)
+### Datasets
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/datasets` | Upload dataset |
 | GET | `/api/datasets/{id}/preview` | Preview data |
 | GET | `/api/datasets/{id}/quality` | Quality report |
 
-### Training Jobs (Phase 2)
+### Training Jobs
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/training/jobs` | Start training |
 | GET | `/api/training/jobs/{id}/progress` | Job progress |
+| POST | `/api/training/jobs/{id}/stop` | Stop training |
 
-### Algorithms (Phase 2)
+### Algorithms
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/algorithms` | List algorithms |
+| GET | `/api/algorithms` | List 14 algorithms |
 | GET | `/api/algorithms/{id}/params` | Hyperparameters |
 
-### Models (Phase 3)
+### Models
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/models` | List models |
@@ -51,43 +57,39 @@ mvn spring-boot:run
 | GET | `/api/models/{id}/confusion-matrix` | Confusion matrix |
 | GET | `/api/models/{id}/roc-curve` | ROC curve |
 | GET | `/api/models/{id}/feature-importance` | Feature importance |
-| GET | `/api/models/{id}/learning-curve` | Learning curve |
 | POST | `/api/models/{id}/deploy` | Deploy model |
 
-### SHAP (Phase 4) ⭐ NEW
+### Explainability (SHAP/LIME)
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/models/{id}/shap/global` | Global feature importance |
-| GET | `/api/models/{id}/shap/summary` | Summary plot data |
-| POST | `/api/models/{id}/shap/local` | Local explanation |
-
-### LIME (Phase 4) ⭐ NEW
-| Method | Endpoint | Description |
-|--------|----------|-------------|
+| GET | `/api/models/{id}/shap/global` | SHAP global importance |
+| POST | `/api/models/{id}/shap/local` | SHAP local explanation |
 | POST | `/api/models/{id}/lime` | LIME explanation |
-
-### PDP & ICE (Phase 4) ⭐ NEW
-| Method | Endpoint | Description |
-|--------|----------|-------------|
 | GET | `/api/models/{id}/pdp/{feature}` | Partial Dependence Plot |
-| GET | `/api/models/{id}/ice/{feature}` | ICE Plot |
+| POST | `/api/models/{id}/whatif` | What-If analysis |
 
-### What-If Analysis (Phase 4) ⭐ NEW
+### Predictions ⭐ NEW
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/models/{id}/whatif` | What-If analysis |
-| POST | `/api/models/{id}/counterfactual` | Counterfactual explanation |
+| POST | `/api/predictions/single` | Single prediction |
+| POST | `/api/predictions/batch` | Batch predictions (CSV) |
+| GET | `/api/predictions/batch/{id}` | Batch job status |
+| GET | `/api/predictions/batch/{id}/download` | Download results |
+| GET | `/api/predictions/history` | Prediction history |
+| POST | `/api/predictions/realtime/{modelId}` | Low-latency prediction |
 
-## 🔗 URLs
+## ✅ All Phases Complete
 
-- **API**: http://localhost:8080/api
-- **Swagger**: http://localhost:8080/swagger-ui.html
-- **H2 Console**: http://localhost:8080/h2-console
+| Phase | Status | Features |
+|-------|--------|----------|
+| Phase 1 | ✅ | Projects, Datasets, Data Sources |
+| Phase 2 | ✅ | Training Jobs, 14 Algorithms |
+| Phase 3 | ✅ | Models, Metrics, Evaluation |
+| Phase 4 | ✅ | SHAP, LIME, PDP, What-If |
+| Phase 5 | ✅ | Single & Batch Predictions |
 
-## ✅ Phase Status
+## 📊 Supported Algorithms (14)
 
-- ✅ Phase 1: Projects, Datasets, Data Sources
-- ✅ Phase 2: Training Jobs, Algorithms  
-- ✅ Phase 3: Models, Evaluation, Metrics
-- ✅ Phase 4: SHAP, LIME, PDP, What-If
-- 🔜 Phase 5: Predictions (Single/Batch)
+XGBoost, LightGBM, CatBoost, Random Forest, Gradient Boosting,
+Neural Network (MLP), Logistic Regression, Linear Regression,
+SVM, KNN, Naive Bayes, Decision Tree, Extra Trees, AdaBoost
