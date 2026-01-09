@@ -21,6 +21,8 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
 import java.util.*;
@@ -112,18 +114,25 @@ public class AutoMLService {
 
         job = autoMLJobRepository.save(job);
 
-        // Start async processing using CompletableFuture.runAsync with executor
+        // Start async processing AFTER transaction commits to avoid race condition
         final String jobId = job.getId();
-        CompletableFuture<?> future = CompletableFuture.runAsync(() -> {
-            try {
-                executeAutoML(jobId);
-            } catch (Exception e) {
-                log.error("AutoML execution failed for job: {}", jobId, e);
+        final AutoMLDTO.JobResponse response = toJobResponse(job, "AutoML job started successfully");
+        
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                CompletableFuture<?> future = CompletableFuture.runAsync(() -> {
+                    try {
+                        executeAutoML(jobId);
+                    } catch (Exception e) {
+                        log.error("AutoML execution failed for job: {}", jobId, e);
+                    }
+                }, executorService);
+                runningJobs.put(jobId, future);
             }
-        }, executorService);
-        runningJobs.put(jobId, future);
+        });
 
-        return toJobResponse(job, "AutoML job started successfully");
+        return response;
     }
 
     /**
