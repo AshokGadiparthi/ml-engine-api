@@ -1,6 +1,7 @@
 package com.mlengine.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mlengine.client.MLEngineClient;
 import com.mlengine.config.MLEngineConfig;
 import com.mlengine.model.dto.PredictionDTO;
 import com.mlengine.model.entity.BatchPredictionJob;
@@ -11,6 +12,7 @@ import com.mlengine.repository.ModelRepository;
 import com.mlengine.repository.PredictionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Async;
@@ -27,7 +29,7 @@ import java.util.stream.Collectors;
 
 /**
  * Service for Prediction operations.
- * Handles single and batch predictions.
+ * Now integrates with Python FastAPI ML Engine for REAL predictions!
  */
 @Slf4j
 @Service
@@ -39,6 +41,10 @@ public class PredictionService {
     private final ModelRepository modelRepository;
     private final MLEngineConfig config;
     private final ObjectMapper objectMapper;
+    private final MLEngineClient mlEngineClient;
+
+    @Value("${ml-engine.api.enabled:true}")
+    private boolean mlEngineEnabled;
 
     // ========== SINGLE PREDICTION ==========
 
@@ -416,7 +422,51 @@ public class PredictionService {
     }
 
     private PredictionResult simulatePrediction(Map<String, Object> features, Model model) {
-        // Simulate realistic prediction based on features
+        // Try REAL ML prediction first if enabled
+        if (mlEngineEnabled && model.getModelPath() != null && !model.getModelPath().isEmpty()) {
+            try {
+                log.info("🚀 Making REAL prediction via FastAPI for model: {}", model.getModelPath());
+                Map<String, Object> response = mlEngineClient.predict(model.getModelPath(), features);
+                
+                PredictionResult result = new PredictionResult();
+                
+                // Extract prediction
+                Object pred = response.get("prediction");
+                if (pred instanceof Number) {
+                    result.predictedClass = ((Number) pred).intValue() == 1 ? "Approved" : "Rejected";
+                } else {
+                    result.predictedClass = String.valueOf(pred);
+                }
+                
+                // Extract probability
+                @SuppressWarnings("unchecked")
+                Map<String, Object> proba = (Map<String, Object>) response.get("probability");
+                if (proba != null) {
+                    // Try to get probability for class 1 (positive class)
+                    Object prob1 = proba.get("1");
+                    if (prob1 == null) prob1 = proba.get("1.0");
+                    if (prob1 == null) prob1 = proba.values().stream().findFirst().orElse(0.5);
+                    result.probability = prob1 instanceof Number ? ((Number) prob1).doubleValue() : 0.5;
+                } else {
+                    result.probability = 0.5;
+                }
+                
+                // Extract confidence
+                Object conf = response.get("confidence");
+                result.confidence = conf instanceof Number ? ((Number) conf).doubleValue() : result.probability;
+                
+                result.riskLevel = getRiskLevel(result.probability);
+                
+                log.info("✅ Real prediction: {} with probability {}", result.predictedClass, result.probability);
+                return result;
+                
+            } catch (Exception e) {
+                log.warn("Failed to get real prediction, falling back to mock: {}", e.getMessage());
+            }
+        }
+        
+        // Fallback to mock prediction
+        log.info("Using mock prediction (ML Engine disabled or model path not set)");
         Random random = new Random();
         double baseProb = 0.5;
 
@@ -424,26 +474,30 @@ public class PredictionService {
         if (features.containsKey("credit_score")) {
             Object val = features.get("credit_score");
             double score = val instanceof Number ? ((Number) val).doubleValue() : 650;
-            baseProb -= (score - 650) / 500.0 * 0.3;  // Higher score = lower churn
+            baseProb -= (score - 650) / 500.0 * 0.3;
         }
         if (features.containsKey("account_age")) {
             Object val = features.get("account_age");
             double age = val instanceof Number ? ((Number) val).doubleValue() : 12;
-            baseProb -= (age - 12) / 60.0 * 0.2;  // Longer tenure = lower churn
+            baseProb -= (age - 12) / 60.0 * 0.2;
         }
         if (features.containsKey("num_transactions")) {
             Object val = features.get("num_transactions");
             double trans = val instanceof Number ? ((Number) val).doubleValue() : 5;
-            baseProb -= (trans - 5) / 20.0 * 0.15;  // More activity = lower churn
+            baseProb -= (trans - 5) / 20.0 * 0.15;
+        }
+        if (features.containsKey("income")) {
+            Object val = features.get("income");
+            double income = val instanceof Number ? ((Number) val).doubleValue() : 50000;
+            baseProb += (income - 50000) / 200000.0 * 0.2;
         }
 
-        // Add some randomness
         double probability = Math.max(0.05, Math.min(0.95, baseProb + random.nextGaussian() * 0.1));
         double confidence = 0.7 + random.nextDouble() * 0.25;
 
         PredictionResult result = new PredictionResult();
         result.probability = probability;
-        result.predictedClass = probability > 0.5 ? "Positive" : "Negative";
+        result.predictedClass = probability > 0.5 ? "Approved" : "Rejected";
         result.confidence = confidence;
         result.riskLevel = getRiskLevel(probability);
 

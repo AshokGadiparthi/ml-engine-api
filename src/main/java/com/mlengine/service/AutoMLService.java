@@ -3,12 +3,11 @@ package com.mlengine.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mlengine.client.MLEngineClient;
 import com.mlengine.model.dto.AutoMLDTO;
-import com.mlengine.model.dto.DeploymentDTO;
 import com.mlengine.model.entity.AutoMLJob;
 import com.mlengine.model.entity.Dataset;
 import com.mlengine.model.entity.Deployment;
-import com.mlengine.model.entity.Model;
 import com.mlengine.model.entity.Project;
 import com.mlengine.model.enums.DeploymentStatus;
 import com.mlengine.model.enums.JobStatus;
@@ -20,6 +19,7 @@ import com.mlengine.repository.ModelRepository;
 import com.mlengine.repository.ProjectRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -37,7 +37,7 @@ import java.util.concurrent.Executors;
 
 /**
  * Service for AutoML operations.
- * Manages automatic model selection and training jobs.
+ * Now integrates with Python FastAPI ML Engine for REAL ML execution!
  */
 @Slf4j
 @Service
@@ -50,9 +50,16 @@ public class AutoMLService {
     private final ModelRepository modelRepository;
     private final DeploymentRepository deploymentRepository;
     private final ObjectMapper objectMapper;
+    private final MLEngineClient mlEngineClient;
+
+    @Value("${ml-engine.api.enabled:true}")
+    private boolean mlEngineEnabled;
 
     // Track running jobs for cancellation
     private final Map<String, CompletableFuture<?>> runningJobs = new ConcurrentHashMap<>();
+    
+    // Map Spring Boot job ID to FastAPI job ID
+    private final Map<String, String> jobIdMapping = new ConcurrentHashMap<>();
     
     // Thread pool for async execution
     private final ExecutorService executorService = Executors.newFixedThreadPool(4);
@@ -119,8 +126,9 @@ public class AutoMLService {
 
         job = autoMLJobRepository.save(job);
 
-        // Start async processing AFTER transaction commits to avoid race condition
+        // Start async processing AFTER transaction commits
         final String jobId = job.getId();
+        final String datasetPath = dataset.getFilePath();
         final AutoMLDTO.JobResponse response = toJobResponse(job, "AutoML job started successfully");
         
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
@@ -128,7 +136,11 @@ public class AutoMLService {
             public void afterCommit() {
                 CompletableFuture<?> future = CompletableFuture.runAsync(() -> {
                     try {
-                        executeAutoML(jobId);
+                        if (mlEngineEnabled) {
+                            executeAutoMLWithFastAPI(jobId, datasetPath);
+                        } else {
+                            executeAutoMLMock(jobId);
+                        }
                     } catch (Exception e) {
                         log.error("AutoML execution failed for job: {}", jobId, e);
                     }
@@ -141,175 +153,167 @@ public class AutoMLService {
     }
 
     /**
-     * Execute AutoML job - runs in separate thread.
-     * This method handles its own transactions.
+     * Execute AutoML using the FastAPI ML Engine - REAL ML!
      */
-    private void executeAutoML(String jobId) {
+    private void executeAutoMLWithFastAPI(String jobId, String datasetPath) {
         try {
-            log.info("Executing AutoML job: {}", jobId);
+            log.info("🚀 Executing REAL AutoML via FastAPI for job: {}", jobId);
             
-            // Fetch fresh copy of job
+            // Get job from database
             AutoMLJob job = autoMLJobRepository.findById(jobId)
                     .orElseThrow(() -> new IllegalArgumentException("Job not found"));
 
-            // Update status to STARTING
+            // Update status
             job.setStatus(JobStatus.STARTING);
             job.setStartedAt(LocalDateTime.now());
             job.setCurrentPhase("DATA_VALIDATION");
             job.setProgress(5);
-            addLog(job, "INFO", "AutoML job started");
+            addLog(job, "INFO", "🚀 Starting REAL ML training via FastAPI");
             autoMLJobRepository.save(job);
 
-            // Phase 1: Data Validation
-            Thread.sleep(2000); // Simulate work
-            
-            // Check if stopped
-            if (!runningJobs.containsKey(jobId)) {
-                markJobStopped(jobId);
-                return;
+            // Call FastAPI to start AutoML
+            Map<String, Object> fastApiResponse = mlEngineClient.startAutoML(
+                    datasetPath,
+                    job.getTargetColumn(),
+                    job.getProblemType().name(),
+                    job.getCvFolds() != null ? job.getCvFolds() : 5,
+                    Boolean.TRUE.equals(job.getEnableFeatureEngineering()),
+                    job.getScalingMethod() != null ? job.getScalingMethod() : "standard"
+            );
+
+            String fastApiJobId = (String) fastApiResponse.get("job_id");
+            if (fastApiJobId == null) {
+                throw new RuntimeException("FastAPI did not return job_id");
             }
+
+            // Store mapping
+            jobIdMapping.put(jobId, fastApiJobId);
             
-            job = autoMLJobRepository.findById(jobId).orElseThrow();
-            job.setProgress(15);
-            job.setCurrentPhase("FEATURE_ENGINEERING");
-            addLog(job, "INFO", "Data validation completed");
+            addLog(job, "INFO", "FastAPI job started: " + fastApiJobId);
             autoMLJobRepository.save(job);
 
-            // Phase 2: Feature Engineering
-            if (Boolean.TRUE.equals(job.getEnableFeatureEngineering())) {
-                Thread.sleep(3000);
-                
+            // Poll for progress
+            boolean completed = false;
+            int maxRetries = 600; // 10 minutes max (1 sec intervals)
+            int retries = 0;
+
+            while (!completed && retries < maxRetries) {
                 // Check if stopped
                 if (!runningJobs.containsKey(jobId)) {
-                    markJobStopped(jobId);
-                    return;
-                }
-                
-                job = autoMLJobRepository.findById(jobId).orElseThrow();
-                addLog(job, "INFO", "Feature engineering: generated additional features");
-            }
-            
-            job = autoMLJobRepository.findById(jobId).orElseThrow();
-            job.setProgress(25);
-            job.setCurrentPhase("ALGORITHM_SELECTION");
-            job.setStatus(JobStatus.TRAINING);
-            addLog(job, "INFO", "Starting algorithm comparison");
-            autoMLJobRepository.save(job);
-
-            // Phase 3: Algorithm Selection - Test multiple algorithms
-            List<AutoMLDTO.LeaderboardEntry> leaderboard = new ArrayList<>();
-            List<String> algorithms = getAlgorithmsForProblemType(job.getProblemType());
-            int totalAlgorithms = algorithms.size();
-            
-            job.setAlgorithmsTotal(totalAlgorithms);
-            autoMLJobRepository.save(job);
-
-            double bestScore = 0;
-            String bestAlgorithm = null;
-
-            for (int i = 0; i < algorithms.size(); i++) {
-                // Check if job was stopped
-                if (!runningJobs.containsKey(jobId)) {
+                    mlEngineClient.stopAutoML(fastApiJobId);
                     markJobStopped(jobId);
                     return;
                 }
 
-                String algorithm = algorithms.get(i);
-                
-                // Refresh job from database
-                job = autoMLJobRepository.findById(jobId).orElseThrow();
-                job.setCurrentAlgorithm(algorithm);
-                addLog(job, "INFO", "Testing " + algorithm + "...");
-                autoMLJobRepository.save(job);
+                Thread.sleep(1000); // Poll every second
+                retries++;
 
-                // Simulate training
-                Thread.sleep(2000 + (long) (Math.random() * 3000));
+                try {
+                    Map<String, Object> progress = mlEngineClient.getAutoMLProgress(fastApiJobId);
+                    
+                    String status = (String) progress.get("status");
+                    Integer progressPct = progress.get("progress") != null ? ((Number) progress.get("progress")).intValue() : null;
+                    String currentPhase = (String) progress.get("current_phase");
+                    String currentAlgorithm = (String) progress.get("current_algorithm");
+                    Integer algorithmsCompleted = progress.get("algorithms_completed") != null ? ((Number) progress.get("algorithms_completed")).intValue() : null;
+                    Integer algorithmsTotal = progress.get("algorithms_total") != null ? ((Number) progress.get("algorithms_total")).intValue() : null;
+                    Double currentBestScore = progress.get("current_best_score") != null 
+                            ? ((Number) progress.get("current_best_score")).doubleValue() 
+                            : null;
+                    String currentBestAlgorithm = (String) progress.get("current_best_algorithm");
 
-                // Check again after training
-                if (!runningJobs.containsKey(jobId)) {
-                    markJobStopped(jobId);
-                    return;
+                    // Update local job
+                    job = autoMLJobRepository.findById(jobId).orElseThrow();
+                    
+                    if (progressPct != null) job.setProgress(progressPct);
+                    if (currentPhase != null) job.setCurrentPhase(mapPhase(currentPhase));
+                    if (currentAlgorithm != null) job.setCurrentAlgorithm(currentAlgorithm);
+                    if (algorithmsCompleted != null) job.setAlgorithmsCompleted(algorithmsCompleted);
+                    if (algorithmsTotal != null) job.setAlgorithmsTotal(algorithmsTotal);
+                    if (currentBestScore != null) job.setCurrentBestScore(currentBestScore);
+                    if (currentBestAlgorithm != null) job.setCurrentBestAlgorithm(currentBestAlgorithm);
+                    
+                    // Update status
+                    if ("running".equals(status)) {
+                        job.setStatus(JobStatus.TRAINING);
+                    }
+                    
+                    autoMLJobRepository.save(job);
+
+                    // Check if completed or failed
+                    if ("completed".equals(status)) {
+                        completed = true;
+                    } else if ("failed".equals(status)) {
+                        String error = (String) progress.get("error_message");
+                        throw new RuntimeException("FastAPI job failed: " + error);
+                    } else if ("stopped".equals(status)) {
+                        markJobStopped(jobId);
+                        return;
+                    }
+
+                } catch (Exception e) {
+                    if (e.getMessage() != null && e.getMessage().contains("failed")) {
+                        throw e;
+                    }
+                    log.warn("Error polling progress: {}", e.getMessage());
                 }
-
-                // Generate mock results
-                double score = generateMockScore(job.getProblemType(), algorithm);
-                AutoMLDTO.LeaderboardEntry entry = createLeaderboardEntry(
-                        i + 1, algorithm, score, job.getProblemType()
-                );
-                leaderboard.add(entry);
-
-                // Refresh and update
-                job = autoMLJobRepository.findById(jobId).orElseThrow();
-                
-                if (score > bestScore) {
-                    bestScore = score;
-                    bestAlgorithm = algorithm;
-                    job.setCurrentBestScore(bestScore);
-                    job.setCurrentBestAlgorithm(bestAlgorithm);
-                    addLog(job, "INFO", algorithm + ": " + formatScore(score, job.getProblemType()) + " - New best!");
-                } else {
-                    addLog(job, "INFO", algorithm + ": " + formatScore(score, job.getProblemType()));
-                }
-
-                job.setAlgorithmsCompleted(i + 1);
-                job.setProgress(25 + (int) ((i + 1.0) / totalAlgorithms * 60));
-                autoMLJobRepository.save(job);
             }
 
-            // Sort leaderboard by score
-            final ProblemType pt = job.getProblemType();
-            leaderboard.sort((a, b) -> {
-                double scoreA = pt == ProblemType.REGRESSION ? (a.getR2() != null ? a.getR2() : 0) : (a.getAccuracy() != null ? a.getAccuracy() : 0);
-                double scoreB = pt == ProblemType.REGRESSION ? (b.getR2() != null ? b.getR2() : 0) : (b.getAccuracy() != null ? b.getAccuracy() : 0);
-                return Double.compare(scoreB, scoreA);
-            });
-
-            // Update ranks
-            for (int i = 0; i < leaderboard.size(); i++) {
-                leaderboard.get(i).setRank(i + 1);
+            if (!completed) {
+                throw new RuntimeException("AutoML job timed out");
             }
 
-            // Phase 4: Model Training (best model)
-            job = autoMLJobRepository.findById(jobId).orElseThrow();
-            job.setCurrentPhase("MODEL_TRAINING");
-            job.setProgress(88);
-            addLog(job, "INFO", "Training final model with " + bestAlgorithm);
-            autoMLJobRepository.save(job);
-            Thread.sleep(2000);
-
-            // Phase 5: Evaluation
-            if (!runningJobs.containsKey(jobId)) {
-                markJobStopped(jobId);
-                return;
-            }
+            // Get final results
+            Map<String, Object> results = mlEngineClient.getAutoMLResults(fastApiJobId);
             
-            job = autoMLJobRepository.findById(jobId).orElseThrow();
-            job.setCurrentPhase("EVALUATION");
-            job.setProgress(95);
-            addLog(job, "INFO", "Running final evaluation on best model");
-            autoMLJobRepository.save(job);
-            Thread.sleep(2000);
-
-            // Phase 6: Complete
+            // Update job with results
             job = autoMLJobRepository.findById(jobId).orElseThrow();
             job.setStatus(JobStatus.COMPLETED);
             job.setCurrentPhase("COMPLETED");
             job.setProgress(100);
             job.setCompletedAt(LocalDateTime.now());
-            job.setBestAlgorithm(bestAlgorithm);
-            job.setBestScore(bestScore);
-            job.setBestMetric(job.getProblemType() == ProblemType.REGRESSION ? "R²" : "Accuracy");
-            job.setLeaderboardJson(serializeJson(leaderboard));
-            job.setFeatureImportanceJson(serializeJson(generateMockFeatureImportance()));
-
-            long elapsed = java.time.Duration.between(job.getStartedAt(), job.getCompletedAt()).getSeconds();
-            job.setElapsedTimeSeconds(elapsed);
-
-            addLog(job, "INFO", "AutoML completed! Best model: " + bestAlgorithm + " with " + formatScore(bestScore, job.getProblemType()));
+            
+            // Extract results
+            job.setBestAlgorithm((String) results.get("best_algorithm"));
+            job.setBestScore(((Number) results.get("best_score")).doubleValue());
+            job.setBestMetric((String) results.get("best_metric"));
+            
+            // Store FastAPI model ID for predictions
+            String fastApiModelId = (String) results.get("model_id");
+            job.setModelPath(fastApiModelId);
+            
+            // Convert leaderboard
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> leaderboard = (List<Map<String, Object>>) results.get("leaderboard");
+            if (leaderboard != null) {
+                List<AutoMLDTO.LeaderboardEntry> entries = convertLeaderboard(leaderboard, job.getProblemType());
+                job.setLeaderboardJson(serializeJson(entries));
+            }
+            
+            // Convert feature importance
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> featureImportance = (List<Map<String, Object>>) results.get("feature_importance");
+            if (featureImportance != null) {
+                List<AutoMLDTO.FeatureImportanceEntry> fiEntries = convertFeatureImportance(featureImportance);
+                job.setFeatureImportanceJson(serializeJson(fiEntries));
+            }
+            
+            // Calculate elapsed time
+            if (job.getStartedAt() != null) {
+                long elapsed = java.time.Duration.between(job.getStartedAt(), job.getCompletedAt()).getSeconds();
+                job.setElapsedTimeSeconds(elapsed);
+            }
+            
+            addLog(job, "INFO", "✅ AutoML completed! Best: " + job.getBestAlgorithm() + 
+                    " with " + String.format("%.2f%%", job.getBestScore() * 100) + " " + job.getBestMetric());
+            
             autoMLJobRepository.save(job);
-
+            
             runningJobs.remove(jobId);
-            log.info("AutoML job completed successfully: {}", jobId);
+            jobIdMapping.remove(jobId);
+            
+            log.info("✅ AutoML job completed successfully: {} with best model: {}", 
+                    jobId, job.getBestAlgorithm());
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -329,9 +333,334 @@ public class AutoMLService {
                 log.error("Failed to update job status", ex);
             }
             runningJobs.remove(jobId);
+            jobIdMapping.remove(jobId);
         }
     }
-    
+
+    /**
+     * Convert FastAPI leaderboard to our DTO format.
+     */
+    private List<AutoMLDTO.LeaderboardEntry> convertLeaderboard(
+            List<Map<String, Object>> fastApiLeaderboard, 
+            ProblemType problemType) {
+        
+        List<AutoMLDTO.LeaderboardEntry> entries = new ArrayList<>();
+        
+        for (Map<String, Object> item : fastApiLeaderboard) {
+            AutoMLDTO.LeaderboardEntry entry = AutoMLDTO.LeaderboardEntry.builder()
+                    .rank(item.get("rank") != null ? ((Number) item.get("rank")).intValue() : 0)
+                    .algorithm((String) item.get("algorithm"))
+                    .score(item.get("score") != null ? ((Number) item.get("score")).doubleValue() : 0)
+                    .std(item.get("std") != null ? ((Number) item.get("std")).doubleValue() : 0)
+                    .trainingTimeSeconds(item.get("training_time_seconds") != null 
+                            ? ((Number) item.get("training_time_seconds")).doubleValue() : 0)
+                    .build();
+            
+            if (problemType == ProblemType.CLASSIFICATION) {
+                entry.setAccuracy(item.get("accuracy") != null ? ((Number) item.get("accuracy")).doubleValue() : null);
+                entry.setPrecision(item.get("precision") != null ? ((Number) item.get("precision")).doubleValue() : null);
+                entry.setRecall(item.get("recall") != null ? ((Number) item.get("recall")).doubleValue() : null);
+                entry.setF1Score(item.get("f1_score") != null ? ((Number) item.get("f1_score")).doubleValue() : null);
+            } else {
+                entry.setR2(item.get("r2") != null ? ((Number) item.get("r2")).doubleValue() : null);
+                entry.setMae(item.get("mae") != null ? ((Number) item.get("mae")).doubleValue() : null);
+                entry.setRmse(item.get("rmse") != null ? ((Number) item.get("rmse")).doubleValue() : null);
+            }
+            
+            entries.add(entry);
+        }
+        
+        return entries;
+    }
+
+    /**
+     * Convert FastAPI feature importance to our DTO format.
+     */
+    private List<AutoMLDTO.FeatureImportanceEntry> convertFeatureImportance(
+            List<Map<String, Object>> fastApiFeatureImportance) {
+        
+        List<AutoMLDTO.FeatureImportanceEntry> entries = new ArrayList<>();
+        
+        for (Map<String, Object> item : fastApiFeatureImportance) {
+            entries.add(AutoMLDTO.FeatureImportanceEntry.builder()
+                    .feature((String) item.get("feature"))
+                    .importance(item.get("importance") != null 
+                            ? ((Number) item.get("importance")).doubleValue() : 0)
+                    .rank(item.get("rank") != null ? ((Number) item.get("rank")).intValue() : 0)
+                    .build());
+        }
+        
+        return entries;
+    }
+
+    /**
+     * Map FastAPI phase names to our phase names.
+     */
+    private String mapPhase(String fastApiPhase) {
+        if (fastApiPhase == null) return "QUEUED";
+        
+        String phase = fastApiPhase.toLowerCase();
+        if (phase.contains("data_loading") || phase.contains("data loading") || 
+            phase.contains("data_validation") || phase.contains("data validation")) {
+            return "DATA_VALIDATION";
+        } else if (phase.contains("feature")) {
+            return "FEATURE_ENGINEERING";
+        } else if (phase.contains("algorithm") || phase.contains("selection")) {
+            return "ALGORITHM_SELECTION";
+        } else if (phase.contains("model") || phase.contains("training")) {
+            return "MODEL_TRAINING";
+        } else if (phase.contains("evaluation")) {
+            return "EVALUATION";
+        } else if (phase.contains("completed")) {
+            return "COMPLETED";
+        }
+        return fastApiPhase.toUpperCase();
+    }
+
+    /**
+     * Mock execution for when ML Engine is disabled (fallback).
+     */
+    private void executeAutoMLMock(String jobId) {
+        try {
+            log.info("Executing MOCK AutoML job: {}", jobId);
+            
+            AutoMLJob job = autoMLJobRepository.findById(jobId)
+                    .orElseThrow(() -> new IllegalArgumentException("Job not found"));
+
+            job.setStatus(JobStatus.STARTING);
+            job.setStartedAt(LocalDateTime.now());
+            job.setCurrentPhase("DATA_VALIDATION");
+            job.setProgress(5);
+            addLog(job, "INFO", "AutoML job started (MOCK MODE)");
+            autoMLJobRepository.save(job);
+
+            // Simulate phases
+            String[] phases = {"DATA_VALIDATION", "FEATURE_ENGINEERING", "ALGORITHM_SELECTION", "MODEL_TRAINING", "EVALUATION"};
+            int[] progress = {15, 25, 70, 90, 95};
+            
+            for (int i = 0; i < phases.length; i++) {
+                Thread.sleep(2000);
+                
+                if (!runningJobs.containsKey(jobId)) {
+                    markJobStopped(jobId);
+                    return;
+                }
+                
+                job = autoMLJobRepository.findById(jobId).orElseThrow();
+                job.setCurrentPhase(phases[i]);
+                job.setProgress(progress[i]);
+                job.setStatus(JobStatus.TRAINING);
+                addLog(job, "INFO", "Phase: " + phases[i]);
+                autoMLJobRepository.save(job);
+            }
+
+            // Complete
+            job = autoMLJobRepository.findById(jobId).orElseThrow();
+            job.setStatus(JobStatus.COMPLETED);
+            job.setCurrentPhase("COMPLETED");
+            job.setProgress(100);
+            job.setCompletedAt(LocalDateTime.now());
+            job.setBestAlgorithm("Random Forest (Mock)");
+            job.setBestScore(0.85 + Math.random() * 0.1);
+            job.setBestMetric(job.getProblemType() == ProblemType.REGRESSION ? "R²" : "Accuracy");
+            job.setLeaderboardJson(serializeJson(generateMockLeaderboard(job.getProblemType())));
+            job.setFeatureImportanceJson(serializeJson(generateMockFeatureImportance()));
+            
+            addLog(job, "INFO", "AutoML completed (MOCK)");
+            autoMLJobRepository.save(job);
+
+            runningJobs.remove(jobId);
+
+        } catch (Exception e) {
+            log.error("Mock AutoML failed: {}", jobId, e);
+            runningJobs.remove(jobId);
+        }
+    }
+
+    private List<AutoMLDTO.LeaderboardEntry> generateMockLeaderboard(ProblemType problemType) {
+        List<AutoMLDTO.LeaderboardEntry> entries = new ArrayList<>();
+        String[] algorithms = {"Random Forest", "XGBoost", "Gradient Boosting", "SVM", "Logistic Regression"};
+        
+        for (int i = 0; i < algorithms.length; i++) {
+            double score = 0.95 - (i * 0.03) + (Math.random() * 0.02);
+            entries.add(AutoMLDTO.LeaderboardEntry.builder()
+                    .rank(i + 1)
+                    .algorithm(algorithms[i])
+                    .score(score)
+                    .accuracy(problemType == ProblemType.CLASSIFICATION ? score : null)
+                    .r2(problemType == ProblemType.REGRESSION ? score : null)
+                    .trainingTimeSeconds(1.0 + Math.random() * 3)
+                    .build());
+        }
+        
+        return entries;
+    }
+
+    private List<AutoMLDTO.FeatureImportanceEntry> generateMockFeatureImportance() {
+        List<AutoMLDTO.FeatureImportanceEntry> entries = new ArrayList<>();
+        String[] features = {"credit_score", "income", "age", "employment", "education"};
+        double[] importances = {0.35, 0.25, 0.20, 0.12, 0.08};
+        
+        for (int i = 0; i < features.length; i++) {
+            entries.add(AutoMLDTO.FeatureImportanceEntry.builder()
+                    .feature(features[i])
+                    .importance(importances[i])
+                    .rank(i + 1)
+                    .build());
+        }
+        
+        return entries;
+    }
+
+    // ============ REST OF THE SERVICE ============
+
+    /**
+     * Get job progress.
+     */
+    public AutoMLDTO.ProgressResponse getProgress(String jobId) {
+        AutoMLJob job = autoMLJobRepository.findById(jobId)
+                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
+
+        return AutoMLDTO.ProgressResponse.builder()
+                .jobId(job.getId())
+                .status(job.getStatus())
+                .statusLabel(job.getStatus().name().toLowerCase())
+                .progress(job.getProgress())
+                .currentPhase(job.getCurrentPhase())
+                .currentAlgorithm(job.getCurrentAlgorithm())
+                .phases(buildPhaseInfo(job))
+                .algorithmsCompleted(job.getAlgorithmsCompleted())
+                .algorithmsTotal(job.getAlgorithmsTotal())
+                .currentBestScore(job.getCurrentBestScore())
+                .currentBestAlgorithm(job.getCurrentBestAlgorithm())
+                .elapsedSeconds(calculateElapsedSeconds(job))
+                .estimatedRemainingSeconds(estimateRemainingSeconds(job))
+                .logs(deserializeLogs(job.getLogsJson()))
+                .errorMessage(job.getErrorMessage())
+                .build();
+    }
+
+    /**
+     * Get completed job results.
+     */
+    public AutoMLDTO.ResultsResponse getResults(String jobId) {
+        AutoMLJob job = autoMLJobRepository.findById(jobId)
+                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
+
+        if (job.getStatus() != JobStatus.COMPLETED) {
+            throw new IllegalStateException("Job not completed. Current status: " + job.getStatus());
+        }
+
+        return AutoMLDTO.ResultsResponse.builder()
+                .jobId(job.getId())
+                .name(job.getName())
+                .status(job.getStatus())
+                .problemType(job.getProblemType())
+                .targetColumn(job.getTargetColumn())
+                .bestAlgorithm(job.getBestAlgorithm())
+                .bestScore(job.getBestScore())
+                .bestMetric(job.getBestMetric())
+                .leaderboard(deserializeLeaderboard(job.getLeaderboardJson()))
+                .featureImportance(deserializeFeatureImportance(job.getFeatureImportanceJson()))
+                .totalTrainingTimeSeconds(job.getElapsedTimeSeconds())
+                .startedAt(job.getStartedAt())
+                .completedAt(job.getCompletedAt())
+                .modelPath(job.getModelPath())
+                .build();
+    }
+
+    /**
+     * Stop a running job.
+     */
+    public AutoMLDTO.JobResponse stopJob(String jobId) {
+        AutoMLJob job = autoMLJobRepository.findById(jobId)
+                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
+
+        if (job.getStatus() != JobStatus.QUEUED && 
+            job.getStatus() != JobStatus.STARTING &&
+            job.getStatus() != JobStatus.TRAINING) {
+            throw new IllegalStateException("Job cannot be stopped. Current status: " + job.getStatus());
+        }
+
+        // Remove from running jobs to signal stop
+        CompletableFuture<?> future = runningJobs.remove(jobId);
+        
+        // Stop FastAPI job if exists
+        String fastApiJobId = jobIdMapping.get(jobId);
+        if (fastApiJobId != null && mlEngineEnabled) {
+            try {
+                mlEngineClient.stopAutoML(fastApiJobId);
+            } catch (Exception e) {
+                log.warn("Failed to stop FastAPI job: {}", e.getMessage());
+            }
+        }
+        
+        if (future != null) {
+            future.cancel(true);
+        }
+
+        job.setStatus(JobStatus.STOPPING);
+        addLog(job, "WARN", "Stop requested");
+        job = autoMLJobRepository.save(job);
+
+        return toJobResponse(job, "Job stop requested");
+    }
+
+    /**
+     * List all AutoML jobs with pagination.
+     */
+    public Page<AutoMLDTO.ListItem> listJobs(
+            String projectId, 
+            JobStatus status, 
+            int page, 
+            int size,
+            String sortBy,
+            String sortDir) {
+        
+        Sort sort = Sort.by(sortDir.equalsIgnoreCase("asc") ? 
+                Sort.Direction.ASC : Sort.Direction.DESC, 
+                sortBy != null ? sortBy : "createdAt");
+        
+        PageRequest pageRequest = PageRequest.of(page, size, sort);
+        
+        Page<AutoMLJob> jobsPage;
+        if (projectId != null && status != null) {
+            jobsPage = autoMLJobRepository.findByProjectIdAndStatus(projectId, status, pageRequest);
+        } else if (projectId != null) {
+            jobsPage = autoMLJobRepository.findByProjectId(projectId, pageRequest);
+        } else if (status != null) {
+            jobsPage = autoMLJobRepository.findByStatus(status, pageRequest);
+        } else {
+            jobsPage = autoMLJobRepository.findAll(pageRequest);
+        }
+
+        return jobsPage.map(this::toListItem);
+    }
+
+    /**
+     * Get a single job.
+     */
+    public AutoMLDTO.JobResponse getJob(String jobId) {
+        AutoMLJob job = autoMLJobRepository.findById(jobId)
+                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
+        return toJobResponse(job, null);
+    }
+
+    /**
+     * Delete a job.
+     */
+    @Transactional
+    public void deleteJob(String jobId) {
+        AutoMLJob job = autoMLJobRepository.findById(jobId)
+                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
+
+        if (job.getStatus() == JobStatus.TRAINING || job.getStatus() == JobStatus.STARTING) {
+            throw new IllegalStateException("Cannot delete running job. Stop it first.");
+        }
+
+        autoMLJobRepository.delete(job);
+    }
+
     /**
      * Mark job as stopped.
      */
@@ -350,478 +679,32 @@ public class AutoMLService {
                 autoMLJobRepository.save(job);
             }
         } catch (Exception e) {
-            log.error("Failed to mark job as stopped: {}", jobId, e);
+            log.error("Failed to mark job as stopped", e);
         }
     }
 
-    /**
-     * Get job progress/status.
-     */
-    public AutoMLDTO.ProgressResponse getJobProgress(String jobId) {
-        AutoMLJob job = autoMLJobRepository.findById(jobId)
-                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
+    // ============ HELPER METHODS ============
 
-        List<AutoMLDTO.PhaseInfo> phases = buildPhaseInfo(job);
-        List<AutoMLDTO.LogEntry> logs = deserializeLogs(job.getLogsJson());
-
-        // Calculate elapsed time
-        Long elapsed = job.getElapsedTimeSeconds();
-        if (elapsed == null && job.getStartedAt() != null) {
-            elapsed = java.time.Duration.between(job.getStartedAt(), LocalDateTime.now()).getSeconds();
+    private int getAlgorithmCount(ProblemType problemType, Integer accuracyVsSpeed) {
+        if (accuracyVsSpeed != null && accuracyVsSpeed < 50) {
+            return 3; // Quick mode
         }
-
-        // Estimate remaining time
-        Long remaining = null;
-        if (job.getProgress() != null && job.getProgress() > 0 && elapsed != null) {
-            remaining = (long) ((elapsed / (job.getProgress() / 100.0)) * ((100 - job.getProgress()) / 100.0));
-        }
-
-        return AutoMLDTO.ProgressResponse.builder()
-                .jobId(job.getId())
-                .name(job.getName())
-                .status(job.getStatus())
-                .statusLabel(job.getStatus().name().toLowerCase())
-                .progress(job.getProgress())
-                .currentPhase(job.getCurrentPhase())
-                .currentAlgorithm(job.getCurrentAlgorithm())
-                .phases(phases)
-                .algorithmsCompleted(job.getAlgorithmsCompleted())
-                .algorithmsTotal(job.getAlgorithmsTotal())
-                .currentBestScore(job.getCurrentBestScore())
-                .currentBestAlgorithm(job.getCurrentBestAlgorithm())
-                .elapsedTimeSeconds(elapsed)
-                .estimatedRemainingSeconds(remaining)
-                .logs(logs)
-                .startedAt(job.getStartedAt())
-                .completedAt(job.getCompletedAt())
-                .errorMessage(job.getErrorMessage())
-                .build();
+        return problemType == ProblemType.CLASSIFICATION ? 5 : 6;
     }
 
-    /**
-     * Get job results (after completion).
-     */
-    public AutoMLDTO.ResultsResponse getJobResults(String jobId) {
-        AutoMLJob job = autoMLJobRepository.findById(jobId)
-                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
-
-        if (job.getStatus() != JobStatus.COMPLETED) {
-            throw new IllegalStateException("Job is not completed yet. Current status: " + job.getStatus());
-        }
-
-        List<AutoMLDTO.LeaderboardEntry> leaderboard = deserializeLeaderboard(job.getLeaderboardJson());
-        List<AutoMLDTO.FeatureImportanceEntry> featureImportance = deserializeFeatureImportance(job.getFeatureImportanceJson());
-
-        Dataset dataset = job.getDataset();
-        Model bestModel = job.getBestModel();
-        
-        // Get deployment info from Deployment entity
-        List<Deployment> deployments = deploymentRepository.findByAutoMLJobId(jobId);
-        Optional<Deployment> activeDeployment = deployments.stream()
-                .filter(d -> d.getStatus() == DeploymentStatus.ACTIVE)
-                .findFirst();
-        Optional<Deployment> latestDeployment = deployments.stream()
-                .max((d1, d2) -> d1.getVersion().compareTo(d2.getVersion()));
-        
-        boolean isDeployed = !deployments.isEmpty();
-        boolean isActiveDeployment = activeDeployment.isPresent();
-        Deployment deployment = activeDeployment.orElse(latestDeployment.orElse(null));
-
-        return AutoMLDTO.ResultsResponse.builder()
-                .jobId(job.getId())
-                .name(job.getName())
-                .status(job.getStatus())
-                .problemType(job.getProblemType())
-                .targetColumn(job.getTargetColumn())
-                .datasetInfo(AutoMLDTO.DatasetInfo.builder()
-                        .datasetId(dataset.getId())
-                        .datasetName(dataset.getName())
-                        .totalRows(dataset.getRowCount())
-                        .totalFeatures(dataset.getColumnCount())
-                        .trainSize((long) (dataset.getRowCount() * 0.8))
-                        .testSize((long) (dataset.getRowCount() * 0.2))
-                        .build())
-                .featureEngineering(AutoMLDTO.FeatureEngineeringInfo.builder()
-                        .enabled(job.getEnableFeatureEngineering())
-                        .scalingMethod(job.getScalingMethod())
-                        .originalFeatures(dataset.getColumnCount())
-                        .engineeredFeatures(dataset.getColumnCount() + (job.getEnableFeatureEngineering() ? 5 : 0))
-                        .build())
-                .leaderboard(leaderboard)
-                .bestModel(AutoMLDTO.BestModelInfo.builder()
-                        .modelId(bestModel != null ? bestModel.getId() : null)
-                        .algorithm(job.getBestAlgorithm())
-                        .score(job.getBestScore())
-                        .metric(job.getBestMetric())
-                        .modelPath(job.getModelPath())
-                        .featureEngineerPath(job.getFeatureEngineerPath())
-                        .build())
-                .featureImportance(featureImportance)
-                .comparisonCsvPath(job.getComparisonCsvPath())
-                .totalTrainingTimeSeconds(job.getElapsedTimeSeconds())
-                .completedAt(job.getCompletedAt())
-                // Deployment info from Deployment entity
-                .isDeployed(isDeployed)
-                .deploymentId(deployment != null ? deployment.getId() : null)
-                .deployedModelId(deployment != null && deployment.getModel() != null ? deployment.getModel().getId() : null)
-                .deploymentEndpoint(deployment != null ? deployment.getEndpointPath() : null)
-                .deployedAt(deployment != null ? deployment.getDeployedAt() : null)
-                .deploymentVersion(deployment != null ? deployment.getVersion() : null)
-                .deploymentVersionLabel(deployment != null ? deployment.getVersionLabel() : null)
-                .isActiveDeployment(isActiveDeployment)
-                .build();
+    private long calculateElapsedSeconds(AutoMLJob job) {
+        if (job.getStartedAt() == null) return 0;
+        LocalDateTime endTime = job.getCompletedAt() != null ? job.getCompletedAt() : LocalDateTime.now();
+        return java.time.Duration.between(job.getStartedAt(), endTime).getSeconds();
     }
 
-    /**
-     * List AutoML jobs with pagination.
-     */
-    public AutoMLDTO.PagedResponse listJobs(String projectId, String status, int page, int size) {
-        PageRequest pageRequest = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
-
-        Page<AutoMLJob> jobPage;
-        if (projectId != null && status != null) {
-            JobStatus jobStatus = JobStatus.valueOf(status.toUpperCase());
-            jobPage = autoMLJobRepository.findByProjectIdAndStatus(projectId, jobStatus, pageRequest);
-        } else if (projectId != null) {
-            jobPage = autoMLJobRepository.findByProjectId(projectId, pageRequest);
-        } else {
-            jobPage = autoMLJobRepository.findAll(pageRequest);
-        }
-
-        List<AutoMLDTO.ListItem> items = jobPage.getContent().stream()
-                .map(this::toListItem)
-                .toList();
-
-        return AutoMLDTO.PagedResponse.builder()
-                .content(items)
-                .totalElements(jobPage.getTotalElements())
-                .totalPages(jobPage.getTotalPages())
-                .page(page)
-                .size(size)
-                .build();
-    }
-
-    /**
-     * Stop a running job.
-     */
-    @Transactional
-    public AutoMLDTO.StopResponse stopJob(String jobId) {
-        AutoMLJob job = autoMLJobRepository.findById(jobId)
-                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
-
-        if (job.getStatus() == JobStatus.COMPLETED || job.getStatus() == JobStatus.FAILED) {
-            throw new IllegalStateException("Cannot stop a job that is already " + job.getStatus());
-        }
-
-        // Remove from running jobs (will trigger stop in async method)
-        CompletableFuture<?> future = runningJobs.remove(jobId);
-        if (future != null) {
-            future.cancel(true);
-        }
-
-        job.setStatus(JobStatus.STOPPED);
-        job.setCompletedAt(LocalDateTime.now());
-        if (job.getStartedAt() != null) {
-            job.setElapsedTimeSeconds(java.time.Duration.between(job.getStartedAt(), job.getCompletedAt()).getSeconds());
-        }
-        addLog(job, "WARN", "Job stopped by user");
-        autoMLJobRepository.save(job);
-
-        return AutoMLDTO.StopResponse.builder()
-                .jobId(jobId)
-                .status(JobStatus.STOPPED)
-                .message("AutoML job stopped successfully")
-                .algorithmsCompleted(job.getAlgorithmsCompleted())
-                .bestScoreAchieved(job.getCurrentBestScore())
-                .stoppedAt(job.getCompletedAt())
-                .build();
-    }
-
-    /**
-     * Delete a job.
-     */
-    @Transactional
-    public void deleteJob(String jobId) {
-        AutoMLJob job = autoMLJobRepository.findById(jobId)
-                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
-
-        // Stop if running
-        CompletableFuture<?> future = runningJobs.remove(jobId);
-        if (future != null) {
-            future.cancel(true);
-        }
-
-        autoMLJobRepository.delete(job);
-        log.info("Deleted AutoML job: {}", jobId);
-    }
-
-    /**
-     * Deploy best model from job.
-     * Creates a versioned deployment with proper tracking.
-     */
-    @Transactional
-    public AutoMLDTO.DeployResponse deployBestModel(String jobId, AutoMLDTO.DeployRequest request) {
-        AutoMLJob job = autoMLJobRepository.findById(jobId)
-                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
-
-        if (job.getStatus() != JobStatus.COMPLETED) {
-            throw new IllegalStateException("Can only deploy models from completed jobs");
-        }
-
-        Project project = job.getProject();
-        if (project == null) {
-            throw new IllegalStateException("AutoML job has no associated project");
-        }
-
-        // Create or get model entity
-        Model model = job.getBestModel();
-        if (model == null) {
-            model = Model.builder()
-                    .name(request.getDeploymentName() != null ? request.getDeploymentName() : job.getBestAlgorithm() + " - " + job.getName())
-                    .algorithm(job.getBestAlgorithm())
-                    .algorithmDisplayName(job.getBestAlgorithm())
-                    .problemType(job.getProblemType())
-                    .project(job.getProject())
-                    .datasetId(job.getDataset().getId())
-                    .datasetName(job.getDataset().getName())
-                    .targetVariable(job.getTargetColumn())
-                    .isDeployed(false)
-                    .build();
-            
-            if (job.getProblemType() == ProblemType.REGRESSION) {
-                model.setR2Score(job.getBestScore());
-            } else {
-                model.setAccuracy(job.getBestScore());
-            }
-            
-            model = modelRepository.save(model);
-            job.setBestModel(model);
-            autoMLJobRepository.save(job);
-        }
-
-        // Deactivate current active deployment for this project
-        Optional<Deployment> currentActive = deploymentRepository.findActiveByProjectId(project.getId());
-        if (currentActive.isPresent()) {
-            Deployment active = currentActive.get();
-            active.setStatus(DeploymentStatus.INACTIVE);
-            active.setDeactivatedAt(LocalDateTime.now());
-            active.setDeactivationReason("Replaced by new deployment from AutoML job");
-            deploymentRepository.save(active);
-            
-            // Update old model status
-            Model oldModel = active.getModel();
-            if (oldModel != null) {
-                oldModel.setIsDeployed(false);
-                modelRepository.save(oldModel);
-            }
-            log.info("Deactivated previous deployment v{}", active.getVersion());
-        }
-
-        // Get next version number
-        Integer nextVersion = deploymentRepository.findMaxVersionByProjectId(project.getId()) + 1;
-
-        // Create deployment name
-        String deploymentName = request.getDeploymentName();
-        if (deploymentName == null || deploymentName.isBlank()) {
-            deploymentName = String.format("%s v%d - %s", job.getBestAlgorithm(), nextVersion, job.getTargetColumn());
-        }
-
-        // Create new deployment
-        Deployment deployment = Deployment.builder()
-                .name(deploymentName)
-                .description(request.getDescription())
-                .project(project)
-                .model(model)
-                .autoMLJob(job)
-                .version(nextVersion)
-                .versionLabel("v" + nextVersion)
-                .status(DeploymentStatus.ACTIVE)
-                .algorithm(job.getBestAlgorithm())
-                .score(job.getBestScore())
-                .metric(job.getBestMetric())
-                .problemType(job.getProblemType())
-                .targetColumn(job.getTargetColumn())
-                .datasetName(job.getDataset().getName())
-                .endpointPath("/api/predictions/realtime/" + model.getId())
-                .endpointUrl("/api/predictions/realtime/" + model.getId())
-                .deployedAt(LocalDateTime.now())
-                .activatedAt(LocalDateTime.now())
-                .predictionsCount(0L)
-                .build();
-
-        deployment = deploymentRepository.save(deployment);
-
-        // Update model deployment status
-        model.setIsDeployed(true);
-        model.setDeployedAt(LocalDateTime.now());
-        modelRepository.save(model);
-
-        log.info("Created deployment v{} for project {} from AutoML job {}", 
-                nextVersion, project.getId(), jobId);
-
-        // Format score for display
-        String scoreFormatted = job.getProblemType() == ProblemType.REGRESSION 
-                ? String.format("R² = %.4f", job.getBestScore())
-                : String.format("%.1f%%", job.getBestScore() * 100);
-
-        return AutoMLDTO.DeployResponse.builder()
-                .deploymentId(deployment.getId())
-                .modelId(model.getId())
-                .name(deployment.getName())
-                .status("ACTIVE")
-                .endpoint(deployment.getEndpointPath())
-                .deployedAt(deployment.getDeployedAt())
-                .version(deployment.getVersion())
-                .versionLabel(deployment.getVersionLabel())
-                .algorithm(deployment.getAlgorithm())
-                .score(deployment.getScore())
-                .scoreFormatted(scoreFormatted)
-                .message("Model deployed successfully as " + deployment.getVersionLabel())
-                .build();
-    }
-
-    /**
-     * Get leaderboard for a job.
-     */
-    public List<AutoMLDTO.LeaderboardEntry> getLeaderboard(String jobId) {
-        AutoMLJob job = autoMLJobRepository.findById(jobId)
-                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
-        return deserializeLeaderboard(job.getLeaderboardJson());
-    }
-
-    /**
-     * Get feature importance for a job.
-     */
-    public List<AutoMLDTO.FeatureImportanceEntry> getFeatureImportance(String jobId) {
-        AutoMLJob job = autoMLJobRepository.findById(jobId)
-                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
-        return deserializeFeatureImportance(job.getFeatureImportanceJson());
-    }
-
-    /**
-     * Get logs for a job.
-     */
-    public List<AutoMLDTO.LogEntry> getJobLogs(String jobId, int limit) {
-        AutoMLJob job = autoMLJobRepository.findById(jobId)
-                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
-        List<AutoMLDTO.LogEntry> logs = deserializeLogs(job.getLogsJson());
-        if (logs.size() > limit) {
-            return logs.subList(logs.size() - limit, logs.size());
-        }
-        return logs;
-    }
-
-    /**
-     * List available algorithms.
-     */
-    public List<Map<String, Object>> listAlgorithms(String problemType) {
-        List<Map<String, Object>> algorithms = new ArrayList<>();
-
-        if (problemType == null || problemType.equalsIgnoreCase("classification")) {
-            algorithms.add(createAlgorithmInfo("XGBoost", "CLASSIFICATION", "Gradient boosting for high accuracy"));
-            algorithms.add(createAlgorithmInfo("Random Forest", "CLASSIFICATION", "Ensemble of decision trees"));
-            algorithms.add(createAlgorithmInfo("Gradient Boosting", "CLASSIFICATION", "Sequential boosting"));
-            algorithms.add(createAlgorithmInfo("Logistic Regression", "CLASSIFICATION", "Fast and interpretable"));
-            algorithms.add(createAlgorithmInfo("SVM", "CLASSIFICATION", "Support Vector Machine"));
-        }
-
-        if (problemType == null || problemType.equalsIgnoreCase("regression")) {
-            algorithms.add(createAlgorithmInfo("XGBoost", "REGRESSION", "Gradient boosting for regression"));
-            algorithms.add(createAlgorithmInfo("Random Forest", "REGRESSION", "Ensemble regression"));
-            algorithms.add(createAlgorithmInfo("Gradient Boosting", "REGRESSION", "Sequential boosting"));
-            algorithms.add(createAlgorithmInfo("Linear Regression", "REGRESSION", "Fast and interpretable"));
-            algorithms.add(createAlgorithmInfo("Ridge", "REGRESSION", "L2 regularized regression"));
-            algorithms.add(createAlgorithmInfo("Lasso", "REGRESSION", "L1 regularized regression"));
-            algorithms.add(createAlgorithmInfo("SVR", "REGRESSION", "Support Vector Regression"));
-        }
-
-        return algorithms;
-    }
-
-    // ==================== HELPER METHODS ====================
-
-    private int getAlgorithmCount(ProblemType problemType, String accuracyVsSpeed) {
-        int base = problemType == ProblemType.REGRESSION ? 7 : 5;
-        return switch (accuracyVsSpeed) {
-            case "low" -> Math.max(2, base - 2);
-            case "high" -> base;
-            default -> Math.max(3, base - 1);
-        };
-    }
-
-    private List<String> getAlgorithmsForProblemType(ProblemType problemType) {
-        if (problemType == ProblemType.REGRESSION) {
-            return List.of("XGBoost", "Random Forest", "Gradient Boosting", "Linear Regression", "Ridge", "Lasso", "SVR");
-        }
-        return List.of("XGBoost", "Random Forest", "Gradient Boosting", "Logistic Regression", "SVM");
-    }
-
-    private double generateMockScore(ProblemType problemType, String algorithm) {
-        double base = switch (algorithm) {
-            case "XGBoost" -> 0.92;
-            case "Random Forest" -> 0.89;
-            case "Gradient Boosting" -> 0.90;
-            case "Logistic Regression", "Linear Regression" -> 0.82;
-            case "SVM", "SVR" -> 0.85;
-            case "Ridge" -> 0.83;
-            case "Lasso" -> 0.81;
-            default -> 0.80;
-        };
-        return base + (Math.random() * 0.06 - 0.03); // Add some randomness
-    }
-
-    private String formatScore(double score, ProblemType problemType) {
-        if (problemType == ProblemType.REGRESSION) {
-            return String.format("R² = %.4f", score);
-        }
-        return String.format("%.1f%% accuracy", score * 100);
-    }
-
-    private AutoMLDTO.LeaderboardEntry createLeaderboardEntry(int rank, String algorithm, double score, ProblemType problemType) {
-        AutoMLDTO.LeaderboardEntry.LeaderboardEntryBuilder builder = AutoMLDTO.LeaderboardEntry.builder()
-                .rank(rank)
-                .algorithm(algorithm)
-                .cvScore(score)
-                .cvStd(Math.random() * 0.02)
-                .trainingTimeSeconds((long) (5 + Math.random() * 115));
-
-        if (problemType == ProblemType.REGRESSION) {
-            builder.r2(score)
-                    .mae(1.5 - score + Math.random() * 0.3)
-                    .rmse(2.0 - score + Math.random() * 0.4);
-        } else {
-            builder.accuracy(score)
-                    .precision(score - 0.01 + Math.random() * 0.02)
-                    .recall(score - 0.02 + Math.random() * 0.03)
-                    .f1Score(score - 0.015 + Math.random() * 0.02)
-                    .auc(score + 0.02 + Math.random() * 0.02);
-        }
-
-        return builder.build();
-    }
-
-    private List<AutoMLDTO.FeatureImportanceEntry> generateMockFeatureImportance() {
-        String[] features = {"tenure", "monthly_charges", "total_charges", "contract_type", "payment_method",
-                "online_security", "tech_support", "internet_service", "senior_citizen", "partner"};
-        List<AutoMLDTO.FeatureImportanceEntry> entries = new ArrayList<>();
-
-        double remaining = 1.0;
-        for (int i = 0; i < features.length; i++) {
-            double importance = i < features.length - 1 ? remaining * (0.15 + Math.random() * 0.25) : remaining;
-            entries.add(AutoMLDTO.FeatureImportanceEntry.builder()
-                    .feature(features[i])
-                    .importance(Math.round(importance * 1000) / 1000.0)
-                    .rank(i + 1)
-                    .build());
-            remaining -= importance;
-        }
-
-        entries.sort((a, b) -> Double.compare(b.getImportance(), a.getImportance()));
-        for (int i = 0; i < entries.size(); i++) {
-            entries.get(i).setRank(i + 1);
-        }
-
-        return entries;
+    private Long estimateRemainingSeconds(AutoMLJob job) {
+        if (job.getProgress() == null || job.getProgress() == 0) return null;
+        long elapsed = calculateElapsedSeconds(job);
+        if (elapsed == 0) return null;
+        double rate = job.getProgress() / (double) elapsed;
+        if (rate == 0) return null;
+        return (long) ((100 - job.getProgress()) / rate);
     }
 
     private List<AutoMLDTO.PhaseInfo> buildPhaseInfo(AutoMLJob job) {
@@ -846,7 +729,7 @@ public class AutoMLService {
 
         String status;
         int progress;
-        if (currentPhase.equals("COMPLETED")) {
+        if (currentPhase != null && currentPhase.equals("COMPLETED")) {
             status = "COMPLETED";
             progress = 100;
         } else if (thisIdx < currentIdx) {
@@ -880,14 +763,6 @@ public class AutoMLService {
         List<AutoMLDTO.LogEntry> logs = deserializeLogs(job.getLogsJson());
         logs.add(createLogEntry(level, message));
         job.setLogsJson(serializeJson(logs));
-    }
-
-    private Map<String, Object> createAlgorithmInfo(String name, String type, String description) {
-        Map<String, Object> info = new HashMap<>();
-        info.put("name", name);
-        info.put("type", type);
-        info.put("description", description);
-        return info;
     }
 
     private String serializeJson(Object obj) {
@@ -964,15 +839,12 @@ public class AutoMLService {
     }
 
     private AutoMLDTO.ListItem toListItem(AutoMLJob job) {
-        // Get deployment info from Deployment entity
         List<Deployment> deployments = deploymentRepository.findByAutoMLJobId(job.getId());
         
-        // Find if there's an active deployment for this job
         Optional<Deployment> activeDeployment = deployments.stream()
                 .filter(d -> d.getStatus() == DeploymentStatus.ACTIVE)
                 .findFirst();
         
-        // Or get the most recent deployment for this job
         Optional<Deployment> latestDeployment = deployments.stream()
                 .max((d1, d2) -> d1.getVersion().compareTo(d2.getVersion()));
         
@@ -996,7 +868,6 @@ public class AutoMLService {
                 .elapsedTimeSeconds(job.getElapsedTimeSeconds())
                 .createdAt(job.getCreatedAt())
                 .completedAt(job.getCompletedAt())
-                // Deployment info
                 .isDeployed(isDeployed)
                 .deploymentId(deployment != null ? deployment.getId() : null)
                 .deployedModelId(deployment != null && deployment.getModel() != null ? deployment.getModel().getId() : null)
