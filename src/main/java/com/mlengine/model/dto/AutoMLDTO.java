@@ -183,6 +183,16 @@ public class AutoMLDTO {
         private String comparisonCsvPath;
         private Long totalTrainingTimeSeconds;
         private LocalDateTime completedAt;
+        
+        // Deployment info
+        private Boolean isDeployed;
+        private String deploymentId;
+        private String deployedModelId;
+        private String deploymentEndpoint;
+        private LocalDateTime deployedAt;
+        private Integer deploymentVersion;
+        private String deploymentVersionLabel;
+        private Boolean isActiveDeployment;
     }
 
     /**
@@ -292,6 +302,16 @@ public class AutoMLDTO {
         private Long elapsedTimeSeconds;
         private LocalDateTime createdAt;
         private LocalDateTime completedAt;
+        
+        // Deployment info
+        private Boolean isDeployed;
+        private String deploymentId;
+        private String deployedModelId;
+        private String deploymentEndpoint;
+        private LocalDateTime deployedAt;
+        private Integer deploymentVersion;
+        private String deploymentVersionLabel;
+        private Boolean isActiveDeployment; // Is this the currently active deployment?
     }
 
     /**
@@ -337,6 +357,14 @@ public class AutoMLDTO {
         private String status;
         private String endpoint;
         private LocalDateTime deployedAt;
+        
+        // New versioning fields
+        private Integer version;
+        private String versionLabel;
+        private String algorithm;
+        private Double score;
+        private String scoreFormatted;
+        private String message;
     }
 
     /**

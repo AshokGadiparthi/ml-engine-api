@@ -4,14 +4,18 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mlengine.model.dto.AutoMLDTO;
+import com.mlengine.model.dto.DeploymentDTO;
 import com.mlengine.model.entity.AutoMLJob;
 import com.mlengine.model.entity.Dataset;
+import com.mlengine.model.entity.Deployment;
 import com.mlengine.model.entity.Model;
 import com.mlengine.model.entity.Project;
+import com.mlengine.model.enums.DeploymentStatus;
 import com.mlengine.model.enums.JobStatus;
 import com.mlengine.model.enums.ProblemType;
 import com.mlengine.repository.AutoMLJobRepository;
 import com.mlengine.repository.DatasetRepository;
+import com.mlengine.repository.DeploymentRepository;
 import com.mlengine.repository.ModelRepository;
 import com.mlengine.repository.ProjectRepository;
 import lombok.RequiredArgsConstructor;
@@ -44,6 +48,7 @@ public class AutoMLService {
     private final DatasetRepository datasetRepository;
     private final ProjectRepository projectRepository;
     private final ModelRepository modelRepository;
+    private final DeploymentRepository deploymentRepository;
     private final ObjectMapper objectMapper;
 
     // Track running jobs for cancellation
@@ -408,6 +413,19 @@ public class AutoMLService {
         List<AutoMLDTO.FeatureImportanceEntry> featureImportance = deserializeFeatureImportance(job.getFeatureImportanceJson());
 
         Dataset dataset = job.getDataset();
+        Model bestModel = job.getBestModel();
+        
+        // Get deployment info from Deployment entity
+        List<Deployment> deployments = deploymentRepository.findByAutoMLJobId(jobId);
+        Optional<Deployment> activeDeployment = deployments.stream()
+                .filter(d -> d.getStatus() == DeploymentStatus.ACTIVE)
+                .findFirst();
+        Optional<Deployment> latestDeployment = deployments.stream()
+                .max((d1, d2) -> d1.getVersion().compareTo(d2.getVersion()));
+        
+        boolean isDeployed = !deployments.isEmpty();
+        boolean isActiveDeployment = activeDeployment.isPresent();
+        Deployment deployment = activeDeployment.orElse(latestDeployment.orElse(null));
 
         return AutoMLDTO.ResultsResponse.builder()
                 .jobId(job.getId())
@@ -431,6 +449,7 @@ public class AutoMLService {
                         .build())
                 .leaderboard(leaderboard)
                 .bestModel(AutoMLDTO.BestModelInfo.builder()
+                        .modelId(bestModel != null ? bestModel.getId() : null)
                         .algorithm(job.getBestAlgorithm())
                         .score(job.getBestScore())
                         .metric(job.getBestMetric())
@@ -441,6 +460,15 @@ public class AutoMLService {
                 .comparisonCsvPath(job.getComparisonCsvPath())
                 .totalTrainingTimeSeconds(job.getElapsedTimeSeconds())
                 .completedAt(job.getCompletedAt())
+                // Deployment info from Deployment entity
+                .isDeployed(isDeployed)
+                .deploymentId(deployment != null ? deployment.getId() : null)
+                .deployedModelId(deployment != null && deployment.getModel() != null ? deployment.getModel().getId() : null)
+                .deploymentEndpoint(deployment != null ? deployment.getEndpointPath() : null)
+                .deployedAt(deployment != null ? deployment.getDeployedAt() : null)
+                .deploymentVersion(deployment != null ? deployment.getVersion() : null)
+                .deploymentVersionLabel(deployment != null ? deployment.getVersionLabel() : null)
+                .isActiveDeployment(isActiveDeployment)
                 .build();
     }
 
@@ -529,6 +557,7 @@ public class AutoMLService {
 
     /**
      * Deploy best model from job.
+     * Creates a versioned deployment with proper tracking.
      */
     @Transactional
     public AutoMLDTO.DeployResponse deployBestModel(String jobId, AutoMLDTO.DeployRequest request) {
@@ -539,7 +568,12 @@ public class AutoMLService {
             throw new IllegalStateException("Can only deploy models from completed jobs");
         }
 
-        // Create or update model entity
+        Project project = job.getProject();
+        if (project == null) {
+            throw new IllegalStateException("AutoML job has no associated project");
+        }
+
+        // Create or get model entity
         Model model = job.getBestModel();
         if (model == null) {
             model = Model.builder()
@@ -551,11 +585,9 @@ public class AutoMLService {
                     .datasetId(job.getDataset().getId())
                     .datasetName(job.getDataset().getName())
                     .targetVariable(job.getTargetColumn())
-                    .isDeployed(true)
-                    .deployedAt(LocalDateTime.now())
+                    .isDeployed(false)
                     .build();
             
-            // Set metrics based on problem type
             if (job.getProblemType() == ProblemType.REGRESSION) {
                 model.setR2Score(job.getBestScore());
             } else {
@@ -563,18 +595,88 @@ public class AutoMLService {
             }
             
             model = modelRepository.save(model);
-
             job.setBestModel(model);
             autoMLJobRepository.save(job);
         }
 
-        return AutoMLDTO.DeployResponse.builder()
-                .deploymentId(model.getId())
-                .modelId(model.getId())
-                .name(model.getName())
-                .status("DEPLOYED")
-                .endpoint("/api/predictions/realtime/" + model.getId())
+        // Deactivate current active deployment for this project
+        Optional<Deployment> currentActive = deploymentRepository.findActiveByProjectId(project.getId());
+        if (currentActive.isPresent()) {
+            Deployment active = currentActive.get();
+            active.setStatus(DeploymentStatus.INACTIVE);
+            active.setDeactivatedAt(LocalDateTime.now());
+            active.setDeactivationReason("Replaced by new deployment from AutoML job");
+            deploymentRepository.save(active);
+            
+            // Update old model status
+            Model oldModel = active.getModel();
+            if (oldModel != null) {
+                oldModel.setIsDeployed(false);
+                modelRepository.save(oldModel);
+            }
+            log.info("Deactivated previous deployment v{}", active.getVersion());
+        }
+
+        // Get next version number
+        Integer nextVersion = deploymentRepository.findMaxVersionByProjectId(project.getId()) + 1;
+
+        // Create deployment name
+        String deploymentName = request.getDeploymentName();
+        if (deploymentName == null || deploymentName.isBlank()) {
+            deploymentName = String.format("%s v%d - %s", job.getBestAlgorithm(), nextVersion, job.getTargetColumn());
+        }
+
+        // Create new deployment
+        Deployment deployment = Deployment.builder()
+                .name(deploymentName)
+                .description(request.getDescription())
+                .project(project)
+                .model(model)
+                .autoMLJob(job)
+                .version(nextVersion)
+                .versionLabel("v" + nextVersion)
+                .status(DeploymentStatus.ACTIVE)
+                .algorithm(job.getBestAlgorithm())
+                .score(job.getBestScore())
+                .metric(job.getBestMetric())
+                .problemType(job.getProblemType())
+                .targetColumn(job.getTargetColumn())
+                .datasetName(job.getDataset().getName())
+                .endpointPath("/api/predictions/realtime/" + model.getId())
+                .endpointUrl("/api/predictions/realtime/" + model.getId())
                 .deployedAt(LocalDateTime.now())
+                .activatedAt(LocalDateTime.now())
+                .predictionsCount(0L)
+                .build();
+
+        deployment = deploymentRepository.save(deployment);
+
+        // Update model deployment status
+        model.setIsDeployed(true);
+        model.setDeployedAt(LocalDateTime.now());
+        modelRepository.save(model);
+
+        log.info("Created deployment v{} for project {} from AutoML job {}", 
+                nextVersion, project.getId(), jobId);
+
+        // Format score for display
+        String scoreFormatted = job.getProblemType() == ProblemType.REGRESSION 
+                ? String.format("R² = %.4f", job.getBestScore())
+                : String.format("%.1f%%", job.getBestScore() * 100);
+
+        return AutoMLDTO.DeployResponse.builder()
+                .deploymentId(deployment.getId())
+                .modelId(model.getId())
+                .name(deployment.getName())
+                .status("ACTIVE")
+                .endpoint(deployment.getEndpointPath())
+                .deployedAt(deployment.getDeployedAt())
+                .version(deployment.getVersion())
+                .versionLabel(deployment.getVersionLabel())
+                .algorithm(deployment.getAlgorithm())
+                .score(deployment.getScore())
+                .scoreFormatted(scoreFormatted)
+                .message("Model deployed successfully as " + deployment.getVersionLabel())
                 .build();
     }
 
@@ -862,6 +964,23 @@ public class AutoMLService {
     }
 
     private AutoMLDTO.ListItem toListItem(AutoMLJob job) {
+        // Get deployment info from Deployment entity
+        List<Deployment> deployments = deploymentRepository.findByAutoMLJobId(job.getId());
+        
+        // Find if there's an active deployment for this job
+        Optional<Deployment> activeDeployment = deployments.stream()
+                .filter(d -> d.getStatus() == DeploymentStatus.ACTIVE)
+                .findFirst();
+        
+        // Or get the most recent deployment for this job
+        Optional<Deployment> latestDeployment = deployments.stream()
+                .max((d1, d2) -> d1.getVersion().compareTo(d2.getVersion()));
+        
+        boolean isDeployed = !deployments.isEmpty();
+        boolean isActiveDeployment = activeDeployment.isPresent();
+        
+        Deployment deployment = activeDeployment.orElse(latestDeployment.orElse(null));
+        
         return AutoMLDTO.ListItem.builder()
                 .jobId(job.getId())
                 .name(job.getName())
@@ -877,6 +996,15 @@ public class AutoMLService {
                 .elapsedTimeSeconds(job.getElapsedTimeSeconds())
                 .createdAt(job.getCreatedAt())
                 .completedAt(job.getCompletedAt())
+                // Deployment info
+                .isDeployed(isDeployed)
+                .deploymentId(deployment != null ? deployment.getId() : null)
+                .deployedModelId(deployment != null && deployment.getModel() != null ? deployment.getModel().getId() : null)
+                .deploymentEndpoint(deployment != null ? deployment.getEndpointPath() : null)
+                .deployedAt(deployment != null ? deployment.getDeployedAt() : null)
+                .deploymentVersion(deployment != null ? deployment.getVersion() : null)
+                .deploymentVersionLabel(deployment != null ? deployment.getVersionLabel() : null)
+                .isActiveDeployment(isActiveDeployment)
                 .build();
     }
 }
