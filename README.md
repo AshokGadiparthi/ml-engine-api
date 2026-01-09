@@ -1,6 +1,6 @@
 # ML Engine API v2.0
 
-Enterprise Machine Learning Platform REST API - Phase 1: Project & Dataset Management
+Enterprise Machine Learning Platform REST API - Phases 1 & 2
 
 ## 🚀 Quick Start
 
@@ -10,9 +10,6 @@ mvn clean package -DskipTests
 
 # Run
 mvn spring-boot:run
-
-# Or
-java -jar target/ml-engine-api-2.0.0.jar
 ```
 
 ## 📡 API Endpoints
@@ -22,7 +19,6 @@ java -jar target/ml-engine-api-2.0.0.jar
 |--------|----------|-------------|
 | GET | `/api` | API status |
 | GET | `/api/health` | Health check |
-| GET | `/api/algorithms` | List available algorithms |
 
 ### Projects
 | Method | Endpoint | Description |
@@ -32,7 +28,7 @@ java -jar target/ml-engine-api-2.0.0.jar
 | GET | `/api/projects/{id}` | Get project details |
 | PUT | `/api/projects/{id}` | Update project |
 | DELETE | `/api/projects/{id}` | Delete project |
-| GET | `/api/projects/{id}/stats` | Get dashboard statistics |
+| GET | `/api/projects/{id}/stats` | Dashboard statistics |
 
 ### Datasets
 | Method | Endpoint | Description |
@@ -40,113 +36,85 @@ java -jar target/ml-engine-api-2.0.0.jar
 | POST | `/api/datasets` | Upload dataset (multipart) |
 | GET | `/api/datasets` | List datasets |
 | GET | `/api/datasets/{id}` | Get dataset details |
-| GET | `/api/datasets/{id}/preview` | Preview data (first N rows) |
-| GET | `/api/datasets/{id}/columns` | Get column metadata |
-| GET | `/api/datasets/{id}/quality` | Get quality report |
-| PUT | `/api/datasets/{id}` | Update dataset |
-| DELETE | `/api/datasets/{id}` | Delete dataset |
+| GET | `/api/datasets/{id}/preview` | Preview data |
+| GET | `/api/datasets/{id}/columns` | Column metadata |
+| GET | `/api/datasets/{id}/quality` | Quality report |
 
 ### Data Sources
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/datasources` | Create data source |
 | GET | `/api/datasources` | List data sources |
-| GET | `/api/datasources/{id}` | Get data source details |
-| POST | `/api/datasources/test` | Test connection (without saving) |
-| POST | `/api/datasources/{id}/test` | Test existing connection |
-| PUT | `/api/datasources/{id}` | Update data source |
-| DELETE | `/api/datasources/{id}` | Delete data source |
+| POST | `/api/datasources/test` | Test connection |
+
+### Training Jobs ⭐ Phase 2
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/training/jobs` | Start training |
+| GET | `/api/training/jobs` | List jobs |
+| GET | `/api/training/jobs/{id}` | Job details |
+| GET | `/api/training/jobs/{id}/progress` | Job progress |
+| POST | `/api/training/jobs/{id}/stop` | Stop job |
+| POST | `/api/training/jobs/{id}/pause` | Pause job |
+| POST | `/api/training/jobs/{id}/resume` | Resume job |
+
+### Algorithms ⭐ Phase 2
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/algorithms` | List all algorithms |
+| GET | `/api/algorithms/{id}` | Algorithm info |
+| GET | `/api/algorithms/{id}/params` | Hyperparameters |
 
 ## 🔗 URLs
 
 - **API**: http://localhost:8080/api
-- **Swagger UI**: http://localhost:8080/swagger-ui.html
+- **Swagger**: http://localhost:8080/swagger-ui.html
 - **H2 Console**: http://localhost:8080/h2-console
-- **Health**: http://localhost:8080/actuator/health
 
-## 📊 React UI Mapping
+## 📊 Supported Algorithms (14)
 
-### Dashboard
-```
-GET /api/projects/{id}/stats
-Response:
-{
-  "modelsCount": 8,
-  "deployedModelsCount": 2,
-  "datasetsCount": 3,
-  "totalDataSize": "2.4 GB",
-  "avgAccuracy": 93.5,
-  "accuracyTrend": 2.3,
-  "predictionsCount": 12450,
-  "predictionsThisMonth": 12450
-}
-```
+| Algorithm | Classification | Regression | GPU |
+|-----------|---------------|------------|-----|
+| xgboost | ✅ | ✅ | ✅ |
+| lightgbm | ✅ | ✅ | ✅ |
+| catboost | ✅ | ✅ | ✅ |
+| random_forest | ✅ | ✅ | ❌ |
+| gradient_boosting | ✅ | ✅ | ❌ |
+| neural_network | ✅ | ✅ | ✅ |
+| logistic_regression | ✅ | ❌ | ❌ |
+| linear_regression | ❌ | ✅ | ❌ |
+| svm | ✅ | ❌ | ❌ |
+| knn | ✅ | ✅ | ❌ |
+| naive_bayes | ✅ | ❌ | ❌ |
+| decision_tree | ✅ | ✅ | ❌ |
+| extra_trees | ✅ | ✅ | ❌ |
+| adaboost | ✅ | ✅ | ❌ |
 
-### Data Management - Upload File
-```
-POST /api/datasets
-Content-Type: multipart/form-data
+## 📋 Example: Start Training
 
-file: [CSV file]
-name: "Customer Transactions"
-description: "Customer transaction data"
-projectId: "project-uuid"
-```
-
-### Data Management - Connect Source
-```
-POST /api/datasources
-{
-  "name": "Production Database",
-  "sourceType": "POSTGRESQL",
-  "host": "localhost",
-  "port": 5432,
-  "databaseName": "analytics",
-  "username": "db_user",
-  "password": "********",
-  "projectId": "project-uuid"
-}
+```bash
+curl -X POST http://localhost:8080/api/training/jobs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "experimentName": "Churn Prediction v1",
+    "datasetId": "your-dataset-id",
+    "algorithm": "xgboost",
+    "targetVariable": "churn",
+    "problemType": "CLASSIFICATION",
+    "trainTestSplit": 0.8,
+    "crossValidationFolds": 5,
+    "hyperparameters": {
+      "max_depth": 6,
+      "learning_rate": 0.1,
+      "n_estimators": 100
+    }
+  }'
 ```
 
-## 🗄️ Database
+## ✅ Phase Status
 
-Using H2 embedded database for development:
-
-- **JDBC URL**: `jdbc:h2:file:./data/mlengine`
-- **Username**: `sa`
-- **Password**: (empty)
-
-For production, switch to PostgreSQL in `application.yml`.
-
-## 📁 Storage
-
-Files are stored in:
-```
-./storage/
-├── datasets/      # Uploaded dataset files
-├── models/        # Trained model files
-├── temp/          # Temporary files
-└── exports/       # Exported reports
-```
-
-## 🔒 CORS
-
-Configured for React development:
-- http://localhost:3000 (Create React App)
-- http://localhost:5173 (Vite)
-
-## 📋 Phase 1 Complete
-
-- ✅ Project CRUD
-- ✅ Dataset upload & management
-- ✅ Data source connections
-- ✅ Dashboard statistics
-- ✅ Data preview
-- ✅ Quality analysis
-- ✅ H2 database persistence
-
-## 🚧 Coming in Phase 2
-
-- Training job management
-- Model training with progress
-- Algorithm selection & hyperparameters
+- ✅ Phase 1: Projects, Datasets, Data Sources
+- ✅ Phase 2: Training Jobs, Algorithms  
+- 🔜 Phase 3: Model Evaluation
+- 🔜 Phase 4: Interpretability (SHAP/LIME)
+- 🔜 Phase 5: Predictions
