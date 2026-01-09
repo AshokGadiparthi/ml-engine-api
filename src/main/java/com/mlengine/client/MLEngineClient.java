@@ -142,7 +142,7 @@ public class MLEngineClient {
     /**
      * Make batch predictions.
      */
-    public Map<String, Object> predictBatch(String modelId, Object[] data) {
+    public Map<String, Object> predictBatch(String modelId, Object data) {
         String url = baseUrl + "/predictions/batch/" + modelId;
         
         Map<String, Object> request = new HashMap<>();
