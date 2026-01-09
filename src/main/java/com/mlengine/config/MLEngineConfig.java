@@ -1,56 +1,69 @@
 package com.mlengine.config;
 
+import jakarta.annotation.PostConstruct;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 
-import jakarta.annotation.PostConstruct;
-import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 /**
- * Configuration for ML Engine integration.
+ * Configuration for ML Engine settings.
  */
 @Data
 @Configuration
 @ConfigurationProperties(prefix = "ml-engine")
 public class MLEngineConfig {
-    
+
     private String pythonPath = "python3";
-    private String modelsDir = "./models";
-    private String dataDir = "./data";
-    private String tempDir = "./temp";
-    private Defaults defaults = new Defaults();
-    
+    private Storage storage = new Storage();
+
     @Data
-    public static class Defaults {
-        private String algorithm = "xgboost";
-        private String problemType = "classification";
-        private double testSize = 0.2;
+    public static class Storage {
+        private String baseDir = "./storage";
+        private String datasetsDir = "./storage/datasets";
+        private String modelsDir = "./storage/models";
+        private String tempDir = "./storage/temp";
+        private String exportsDir = "./storage/exports";
     }
-    
+
     @PostConstruct
     public void init() {
-        // Create directories if they don't exist (use absolute paths)
-        modelsDir = createAbsoluteDirectory(modelsDir);
-        dataDir = createAbsoluteDirectory(dataDir);
-        tempDir = createAbsoluteDirectory(tempDir);
+        // Create all storage directories
+        createDirectory(storage.getBaseDir());
+        createDirectory(storage.getDatasetsDir());
+        createDirectory(storage.getModelsDir());
+        createDirectory(storage.getTempDir());
+        createDirectory(storage.getExportsDir());
         
-        System.out.println("📁 ML Engine directories initialized:");
-        System.out.println("   Models: " + modelsDir);
-        System.out.println("   Data: " + dataDir);
-        System.out.println("   Temp: " + tempDir);
+        // Make paths absolute
+        storage.setBaseDir(toAbsolutePath(storage.getBaseDir()));
+        storage.setDatasetsDir(toAbsolutePath(storage.getDatasetsDir()));
+        storage.setModelsDir(toAbsolutePath(storage.getModelsDir()));
+        storage.setTempDir(toAbsolutePath(storage.getTempDir()));
+        storage.setExportsDir(toAbsolutePath(storage.getExportsDir()));
+
+        System.out.println("📁 Storage directories initialized:");
+        System.out.println("   Base:     " + storage.getBaseDir());
+        System.out.println("   Datasets: " + storage.getDatasetsDir());
+        System.out.println("   Models:   " + storage.getModelsDir());
+        System.out.println("   Temp:     " + storage.getTempDir());
+        System.out.println("   Exports:  " + storage.getExportsDir());
     }
-    
-    private String createAbsoluteDirectory(String path) {
+
+    private void createDirectory(String path) {
         try {
-            java.nio.file.Path dirPath = java.nio.file.Path.of(path).toAbsolutePath();
-            if (!java.nio.file.Files.exists(dirPath)) {
-                java.nio.file.Files.createDirectories(dirPath);
+            Path dirPath = Path.of(path);
+            if (!Files.exists(dirPath)) {
+                Files.createDirectories(dirPath);
             }
-            return dirPath.toString();
         } catch (Exception e) {
             System.err.println("Failed to create directory: " + path + " - " + e.getMessage());
-            return path;
         }
+    }
+
+    private String toAbsolutePath(String path) {
+        return Path.of(path).toAbsolutePath().toString();
     }
 }
