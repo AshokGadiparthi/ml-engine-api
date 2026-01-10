@@ -293,9 +293,14 @@ public class TrainingService {
             job.setCompletedAt(LocalDateTime.now());
             job.setStatusMessage("Training completed successfully");
             
-            // Extract metrics
-            Double accuracy = results.get("accuracy") != null ? 
-                    ((Number) results.get("accuracy")).doubleValue() : null;
+            // Extract metrics - FastAPI returns test_score, not accuracy
+            Double accuracy = null;
+            if (results.get("accuracy") != null) {
+                accuracy = ((Number) results.get("accuracy")).doubleValue();
+            } else if (results.get("test_score") != null) {
+                accuracy = ((Number) results.get("test_score")).doubleValue();
+            }
+            
             Double precision = results.get("precision") != null ?
                     ((Number) results.get("precision")).doubleValue() : null;
             Double recall = results.get("recall") != null ?
@@ -387,8 +392,16 @@ public class TrainingService {
      * Create Model entity from completed training job.
      */
     private Model createModelFromJob(TrainingJob job, Map<String, Object> results) {
-        Double accuracy = results.get("accuracy") != null ? 
-                ((Number) results.get("accuracy")).doubleValue() : job.getCurrentAccuracy();
+        // FastAPI returns test_score, Spring Boot expects accuracy
+        Double accuracy = null;
+        if (results.get("accuracy") != null) {
+            accuracy = ((Number) results.get("accuracy")).doubleValue();
+        } else if (results.get("test_score") != null) {
+            accuracy = ((Number) results.get("test_score")).doubleValue();
+        } else if (job.getCurrentAccuracy() != null) {
+            accuracy = job.getCurrentAccuracy();
+        }
+        
         Double precision = results.get("precision") != null ?
                 ((Number) results.get("precision")).doubleValue() : null;
         Double recall = results.get("recall") != null ?
