@@ -51,6 +51,7 @@ public class AutoMLService {
     private final DeploymentRepository deploymentRepository;
     private final ObjectMapper objectMapper;
     private final MLEngineClient mlEngineClient;
+    private final ActivityService activityService;
 
     // Track running jobs for cancellation
     private final Map<String, CompletableFuture<?>> runningJobs = new ConcurrentHashMap<>();
@@ -122,6 +123,19 @@ public class AutoMLService {
         )));
 
         job = autoMLJobRepository.save(job);
+        
+        // Record training started activity
+        try {
+            activityService.recordTrainingStarted(
+                    job.getId(),
+                    job.getName() != null ? job.getName() : "AutoML Run",
+                    "AutoML (" + job.getProblemType() + ")",
+                    "System",
+                    project != null ? project.getId() : null
+            );
+        } catch (Exception e) {
+            log.warn("Failed to record activity: {}", e.getMessage());
+        }
 
         // Start async processing AFTER transaction commits
         final String jobId = job.getId();
@@ -307,6 +321,28 @@ public class AutoMLService {
             
             log.info("✅ AutoML job completed successfully: {} with best model: {}", 
                     jobId, job.getBestAlgorithm());
+            
+            // Record activity for completed training
+            try {
+                activityService.recordTrainingCompleted(
+                        jobId,
+                        job.getName() != null ? job.getName() : "AutoML Run",
+                        String.format("%.1f%%", job.getBestScore() * 100),
+                        "System",
+                        job.getProject() != null ? job.getProject().getId() : null
+                );
+                
+                // Also record model creation
+                activityService.recordModelCreated(
+                        job.getModelPath(),
+                        job.getBestAlgorithm() + " - AutoML",
+                        String.format("%.1f%%", job.getBestScore() * 100),
+                        "System",
+                        job.getProject() != null ? job.getProject().getId() : null
+                );
+            } catch (Exception activityEx) {
+                log.warn("Failed to record activity: {}", activityEx.getMessage());
+            }
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -321,6 +357,15 @@ public class AutoMLService {
                     job.setErrorMessage(e.getMessage());
                     addLog(job, "ERROR", "Job failed: " + e.getMessage());
                     autoMLJobRepository.save(job);
+                    
+                    // Record failure activity
+                    activityService.recordTrainingFailed(
+                            jobId,
+                            job.getName() != null ? job.getName() : "AutoML Run",
+                            e.getMessage() != null ? e.getMessage().substring(0, Math.min(100, e.getMessage().length())) : "Unknown error",
+                            "System",
+                            job.getProject() != null ? job.getProject().getId() : null
+                    );
                 }
             } catch (Exception ex) {
                 log.error("Failed to update job status", ex);
@@ -675,6 +720,18 @@ public class AutoMLService {
             model = modelRepository.save(model);
             job.setBestModel(model);
             autoMLJobRepository.save(job);
+            
+            // Record deployment activity
+            try {
+                activityService.recordModelDeployed(
+                        model.getId(),
+                        model.getName(),
+                        "System",
+                        job.getProject() != null ? job.getProject().getId() : null
+                );
+            } catch (Exception e) {
+                log.warn("Failed to record deployment activity: {}", e.getMessage());
+            }
         }
 
         return AutoMLDTO.DeployResponse.builder()

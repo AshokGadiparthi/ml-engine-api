@@ -25,6 +25,7 @@ public class ProjectService {
     private final ProjectRepository projectRepository;
     private final DatasetRepository datasetRepository;
     private final DataSourceRepository dataSourceRepository;
+    private final ActivityService activityService;
 
     /**
      * Create a new project.
@@ -50,6 +51,17 @@ public class ProjectService {
 
         project = projectRepository.save(project);
         log.info("Created project with ID: {}", project.getId());
+        
+        // Record project creation activity
+        try {
+            activityService.recordProjectCreated(
+                    project.getId(),
+                    project.getName(),
+                    "System"
+            );
+        } catch (Exception e) {
+            log.warn("Failed to record activity: {}", e.getMessage());
+        }
 
         return toResponse(project);
     }

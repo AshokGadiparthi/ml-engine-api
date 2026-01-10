@@ -41,6 +41,7 @@ public class DatasetService {
     private final ProjectRepository projectRepository;
     private final MLEngineConfig config;
     private final ObjectMapper objectMapper;
+    private final ActivityService activityService;
 
     /**
      * Upload and create dataset from file.
@@ -80,6 +81,21 @@ public class DatasetService {
 
         // Process file asynchronously
         processDatasetAsync(dataset.getId());
+        
+        // Record dataset upload activity
+        try {
+            activityService.recordDatasetUploaded(
+                    dataset.getId(),
+                    dataset.getName(),
+                    file.getSize() > 1024 * 1024 
+                            ? String.format("%.1f MB", file.getSize() / (1024.0 * 1024.0))
+                            : String.format("%.1f KB", file.getSize() / 1024.0),
+                    "System",
+                    project != null ? project.getId() : null
+            );
+        } catch (Exception e) {
+            log.warn("Failed to record activity: {}", e.getMessage());
+        }
 
         return toResponse(dataset);
     }
