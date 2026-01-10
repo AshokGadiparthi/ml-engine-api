@@ -408,7 +408,7 @@ public class TrainingService {
                 .modelPath(job.getModelPath())  // FastAPI model ID
                 .trainingJobId(job.getId())
                 .accuracy(accuracy)
-                .precision(precision)
+                .precisionScore(precision)
                 .recall(recall)
                 .f1Score(f1Score)
                 .crossValidationScore(accuracy)
