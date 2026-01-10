@@ -193,12 +193,12 @@ public class ProjectService {
         
         // Update prediction counts
         Long predictionsCount = predictionRepository.countByProject(projectId);
-        project.setPredictionsCount(predictionsCount != null ? predictionsCount.intValue() : 0);
+        project.setPredictionsCount(predictionsCount != null ? predictionsCount : 0L);
         
         // Predictions this month
         LocalDateTime monthStart = LocalDateTime.now().truncatedTo(ChronoUnit.DAYS).withDayOfMonth(1);
         Long predictionsThisMonth = predictionRepository.countByProjectSince(projectId, monthStart);
-        project.setPredictionsThisMonth(predictionsThisMonth != null ? predictionsThisMonth.intValue() : 0);
+        project.setPredictionsThisMonth(predictionsThisMonth != null ? predictionsThisMonth : 0L);
 
         // Save updated stats
         projectRepository.save(project);
