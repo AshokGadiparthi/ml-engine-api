@@ -411,7 +411,6 @@ public class TrainingService {
                 .precisionScore(precision)
                 .recall(recall)
                 .f1Score(f1Score)
-                .crossValidationScore(accuracy)
                 .isDeployed(false)
                 .build();
         
