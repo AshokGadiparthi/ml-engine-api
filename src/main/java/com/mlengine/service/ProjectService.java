@@ -5,12 +5,16 @@ import com.mlengine.model.entity.Project;
 import com.mlengine.model.enums.ProjectStatus;
 import com.mlengine.repository.DatasetRepository;
 import com.mlengine.repository.DataSourceRepository;
+import com.mlengine.repository.ModelRepository;
+import com.mlengine.repository.PredictionRepository;
 import com.mlengine.repository.ProjectRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -25,6 +29,8 @@ public class ProjectService {
     private final ProjectRepository projectRepository;
     private final DatasetRepository datasetRepository;
     private final DataSourceRepository dataSourceRepository;
+    private final ModelRepository modelRepository;
+    private final PredictionRepository predictionRepository;
     private final ActivityService activityService;
 
     /**
@@ -161,12 +167,38 @@ public class ProjectService {
     // ========== Private Helper Methods ==========
 
     private void updateProjectStats(Project project) {
+        String projectId = project.getId();
+        
         // Update dataset count and size
-        Integer datasetsCount = datasetRepository.countActiveByProjectId(project.getId());
-        Long totalSize = datasetRepository.sumFileSizeByProjectId(project.getId());
-
+        Integer datasetsCount = datasetRepository.countActiveByProjectId(projectId);
+        Long totalSize = datasetRepository.sumFileSizeByProjectId(projectId);
         project.setDatasetsCount(datasetsCount != null ? datasetsCount : 0);
         project.setTotalDataSizeBytes(totalSize != null ? totalSize : 0L);
+        
+        // Update model counts
+        Integer modelsCount = modelRepository.countByProject(projectId);
+        Integer deployedModelsCount = modelRepository.countDeployedByProject(projectId);
+        project.setModelsCount(modelsCount != null ? modelsCount : 0);
+        project.setDeployedModelsCount(deployedModelsCount != null ? deployedModelsCount : 0);
+        
+        // Update average accuracy
+        Double avgAccuracy = modelRepository.avgAccuracyByProject(projectId);
+        project.setAvgAccuracy(avgAccuracy);
+        
+        // Calculate accuracy trend (compare to last week - simplified)
+        // For now, just set based on whether we have models
+        if (avgAccuracy != null && avgAccuracy > 0) {
+            project.setAccuracyTrend(0.0); // neutral trend
+        }
+        
+        // Update prediction counts
+        Long predictionsCount = predictionRepository.countByProject(projectId);
+        project.setPredictionsCount(predictionsCount != null ? predictionsCount.intValue() : 0);
+        
+        // Predictions this month
+        LocalDateTime monthStart = LocalDateTime.now().truncatedTo(ChronoUnit.DAYS).withDayOfMonth(1);
+        Long predictionsThisMonth = predictionRepository.countByProjectSince(projectId, monthStart);
+        project.setPredictionsThisMonth(predictionsThisMonth != null ? predictionsThisMonth.intValue() : 0);
 
         // Save updated stats
         projectRepository.save(project);

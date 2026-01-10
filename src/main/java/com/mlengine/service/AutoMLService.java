@@ -599,9 +599,9 @@ public class AutoMLService {
         Page<AutoMLJob> jobPage;
         if (projectId != null && status != null) {
             JobStatus jobStatus = JobStatus.valueOf(status.toUpperCase());
-            jobPage = autoMLJobRepository.findByProjectIdAndStatus(projectId, jobStatus, pageRequest);
+            jobPage = autoMLJobRepository.findByProject_IdAndStatus(projectId, jobStatus, pageRequest);
         } else if (projectId != null) {
-            jobPage = autoMLJobRepository.findByProjectId(projectId, pageRequest);
+            jobPage = autoMLJobRepository.findByProject_Id(projectId, pageRequest);
         } else {
             jobPage = autoMLJobRepository.findAll(pageRequest);
         }

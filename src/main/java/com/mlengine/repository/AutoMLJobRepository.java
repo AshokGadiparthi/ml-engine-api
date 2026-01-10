@@ -16,15 +16,15 @@ import java.util.List;
 @Repository
 public interface AutoMLJobRepository extends JpaRepository<AutoMLJob, String> {
 
-    List<AutoMLJob> findByProjectIdOrderByCreatedAtDesc(String projectId);
+    List<AutoMLJob> findByProject_IdOrderByCreatedAtDesc(String projectId);
 
-    Page<AutoMLJob> findByProjectId(String projectId, Pageable pageable);
+    Page<AutoMLJob> findByProject_Id(String projectId, Pageable pageable);
 
     List<AutoMLJob> findByStatus(JobStatus status);
 
-    List<AutoMLJob> findByProjectIdAndStatus(String projectId, JobStatus status);
+    List<AutoMLJob> findByProject_IdAndStatus(String projectId, JobStatus status);
 
-    Page<AutoMLJob> findByProjectIdAndStatus(String projectId, JobStatus status, Pageable pageable);
+    Page<AutoMLJob> findByProject_IdAndStatus(String projectId, JobStatus status, Pageable pageable);
 
     @Query("SELECT j FROM AutoMLJob j WHERE j.status IN ('QUEUED', 'STARTING', 'TRAINING', 'VALIDATING')")
     List<AutoMLJob> findRunningJobs();
@@ -38,7 +38,7 @@ public interface AutoMLJobRepository extends JpaRepository<AutoMLJob, String> {
     @Query("SELECT COUNT(j) FROM AutoMLJob j WHERE j.project.id = :projectId AND j.status = :status")
     Long countByProjectIdAndStatus(String projectId, JobStatus status);
 
-    List<AutoMLJob> findTop5ByProjectIdOrderByCreatedAtDesc(String projectId);
+    List<AutoMLJob> findTop5ByProject_IdOrderByCreatedAtDesc(String projectId);
 
-    List<AutoMLJob> findByDatasetId(String datasetId);
+    List<AutoMLJob> findByDataset_Id(String datasetId);
 }

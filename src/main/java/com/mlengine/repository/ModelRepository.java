@@ -15,30 +15,30 @@ import java.util.Optional;
 @Repository
 public interface ModelRepository extends JpaRepository<Model, String> {
 
-    List<Model> findByProjectIdOrderByCreatedAtDesc(String projectId);
+    List<Model> findByProject_IdOrderByCreatedAtDesc(String projectId);
 
     List<Model> findByIsDeployedTrueOrderByDeployedAtDesc();
 
-    List<Model> findByProjectIdAndIsDeployedTrueOrderByDeployedAtDesc(String projectId);
+    List<Model> findByProject_IdAndIsDeployedTrueOrderByDeployedAtDesc(String projectId);
 
     Optional<Model> findByTrainingJobId(String trainingJobId);
 
-    @Query("SELECT m FROM Model m WHERE m.projectId = :projectId ORDER BY m.accuracy DESC")
+    @Query("SELECT m FROM Model m WHERE m.project.id = :projectId ORDER BY m.accuracy DESC")
     List<Model> findByProjectOrderByAccuracy(@Param("projectId") String projectId);
 
-    @Query("SELECT m FROM Model m WHERE m.projectId = :projectId AND m.isBest = true")
+    @Query("SELECT m FROM Model m WHERE m.project.id = :projectId AND m.isBest = true")
     Optional<Model> findBestByProject(@Param("projectId") String projectId);
 
-    @Query("SELECT COUNT(m) FROM Model m WHERE m.projectId = :projectId")
+    @Query("SELECT COUNT(m) FROM Model m WHERE m.project.id = :projectId")
     Integer countByProject(@Param("projectId") String projectId);
 
-    @Query("SELECT COUNT(m) FROM Model m WHERE m.projectId = :projectId AND m.isDeployed = true")
+    @Query("SELECT COUNT(m) FROM Model m WHERE m.project.id = :projectId AND m.isDeployed = true")
     Integer countDeployedByProject(@Param("projectId") String projectId);
 
-    @Query("SELECT AVG(m.accuracy) FROM Model m WHERE m.projectId = :projectId")
+    @Query("SELECT AVG(m.accuracy) FROM Model m WHERE m.project.id = :projectId AND m.accuracy IS NOT NULL")
     Double avgAccuracyByProject(@Param("projectId") String projectId);
 
-    List<Model> findTop5ByProjectIdOrderByCreatedAtDesc(String projectId);
+    List<Model> findTop5ByProject_IdOrderByCreatedAtDesc(String projectId);
 
     List<Model> findAllByOrderByCreatedAtDesc();
 }

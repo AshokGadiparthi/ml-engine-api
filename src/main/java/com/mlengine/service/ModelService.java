@@ -37,7 +37,7 @@ public class ModelService {
      */
     public List<ModelDTO.ListItem> getAllModels(String projectId) {
         List<Model> models = projectId != null
-                ? modelRepository.findByProjectIdOrderByCreatedAtDesc(projectId)
+                ? modelRepository.findByProject_IdOrderByCreatedAtDesc(projectId)
                 : modelRepository.findAllByOrderByCreatedAtDesc();
 
         return models.stream()
@@ -59,7 +59,7 @@ public class ModelService {
      */
     public List<ModelDTO.ListItem> getRecentModels(String projectId, int limit) {
         List<Model> models = projectId != null
-                ? modelRepository.findTop5ByProjectIdOrderByCreatedAtDesc(projectId)
+                ? modelRepository.findTop5ByProject_IdOrderByCreatedAtDesc(projectId)
                 : modelRepository.findAllByOrderByCreatedAtDesc();
 
         return models.stream()
