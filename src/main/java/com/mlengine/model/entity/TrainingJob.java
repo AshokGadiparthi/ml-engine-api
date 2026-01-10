@@ -72,6 +72,9 @@ public class TrainingJob {
     @Column(name = "algorithm", nullable = false)
     private String algorithm;  // e.g., "xgboost", "random_forest"
 
+    @Column(name = "algorithm_display_name")
+    private String algorithmDisplayName;  // e.g., "XGBoost (Gradient Boosting)"
+
     @Column(name = "target_variable")
     private String targetVariable;  // e.g., "churn"
 
