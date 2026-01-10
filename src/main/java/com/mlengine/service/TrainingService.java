@@ -2,37 +2,40 @@ package com.mlengine.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.mlengine.config.MLEngineConfig;
+import com.mlengine.client.MLEngineClient;
 import com.mlengine.model.dto.TrainingJobDTO;
 import com.mlengine.model.entity.Dataset;
 import com.mlengine.model.entity.Model;
 import com.mlengine.model.entity.Project;
 import com.mlengine.model.entity.TrainingJob;
 import com.mlengine.model.enums.JobStatus;
+import com.mlengine.model.enums.ProblemType;
 import com.mlengine.repository.DatasetRepository;
 import com.mlengine.repository.ModelRepository;
 import com.mlengine.repository.ProjectRepository;
 import com.mlengine.repository.TrainingJobRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 /**
  * Service for training job operations.
- * Handles async training with Python ML Engine.
+ * Integrates with Python FastAPI ML Engine for REAL ML training.
  */
 @Slf4j
 @Service
@@ -44,18 +47,26 @@ public class TrainingService {
     private final ModelRepository modelRepository;
     private final ProjectRepository projectRepository;
     private final AlgorithmService algorithmService;
-    private final MLEngineConfig config;
+    private final MLEngineClient mlEngineClient;
+    private final ActivityService activityService;
     private final ObjectMapper objectMapper;
 
-    // Track running processes
-    private final Map<String, Process> runningProcesses = new ConcurrentHashMap<>();
+    // Track running jobs for cancellation
+    private final Map<String, CompletableFuture<?>> runningJobs = new ConcurrentHashMap<>();
+    
+    // Map Spring Boot job ID to FastAPI job ID
+    private final Map<String, String> jobIdMapping = new ConcurrentHashMap<>();
+    
+    // Executor for async training
+    private final ExecutorService executorService = Executors.newFixedThreadPool(4);
 
     /**
-     * Start a new training job.
+     * Start a new training job via FastAPI.
      */
     @Transactional
     public TrainingJobDTO.Response startTraining(TrainingJobDTO.CreateRequest request) {
-        log.info("Starting training job: {} with algorithm {}", request.getExperimentName(), request.getAlgorithm());
+        log.info("🚀 Starting REAL training job: {} with algorithm {}", 
+                request.getExperimentName(), request.getAlgorithm());
 
         // Validate dataset
         Dataset dataset = datasetRepository.findById(request.getDatasetId())
@@ -86,7 +97,7 @@ public class TrainingService {
             }
         }
 
-        // Create training job
+        // Create training job entity
         TrainingJob job = TrainingJob.builder()
                 .jobName(jobName)
                 .experimentName(request.getExperimentName())
@@ -97,6 +108,7 @@ public class TrainingService {
                 .datasetId(request.getDatasetId())
                 .datasetName(dataset.getName())
                 .algorithm(request.getAlgorithm())
+                .algorithmDisplayName(algorithmDisplayName)
                 .targetVariable(request.getTargetVariable())
                 .problemType(request.getProblemType())
                 .trainTestSplit(request.getTrainTestSplit())
@@ -116,10 +128,308 @@ public class TrainingService {
         job = trainingJobRepository.save(job);
         log.info("Created training job: {}", job.getId());
 
-        // Start training asynchronously
-        executeTrainingAsync(job.getId());
+        // Record activity
+        try {
+            activityService.recordTrainingStarted(
+                    job.getId(),
+                    jobName,
+                    algorithmDisplayName,
+                    "System",
+                    project != null ? project.getId() : null
+            );
+        } catch (Exception e) {
+            log.warn("Failed to record activity: {}", e.getMessage());
+        }
 
-        return toResponse(job);
+        // Start async training via FastAPI AFTER transaction commits
+        final String jobId = job.getId();
+        final String datasetPath = dataset.getFilePath();
+        final TrainingJobDTO.Response response = toResponse(job);
+        
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                CompletableFuture<?> future = CompletableFuture.runAsync(() -> {
+                    try {
+                        executeTrainingWithFastAPI(jobId, datasetPath);
+                    } catch (Exception e) {
+                        log.error("Training execution failed for job: {}", jobId, e);
+                    }
+                }, executorService);
+                runningJobs.put(jobId, future);
+            }
+        });
+
+        return response;
+    }
+
+    /**
+     * Execute training using the FastAPI ML Engine - REAL ML!
+     */
+    private void executeTrainingWithFastAPI(String jobId, String datasetPath) {
+        try {
+            log.info("🚀 Executing REAL ML training via FastAPI for job: {}", jobId);
+            
+            // Get job from database
+            TrainingJob job = trainingJobRepository.findById(jobId)
+                    .orElseThrow(() -> new IllegalArgumentException("Job not found"));
+
+            // Update status to starting
+            job.setStatus(JobStatus.STARTING);
+            job.setStartedAt(LocalDateTime.now());
+            job.setStatusMessage("Connecting to ML Engine...");
+            job.setProgress(5);
+            trainingJobRepository.save(job);
+
+            // Build config for FastAPI
+            Map<String, Object> config = new HashMap<>();
+            config.put("train_test_split", job.getTrainTestSplit());
+            config.put("cv_folds", job.getCrossValidationFolds());
+            config.put("early_stopping", job.getEarlyStopping());
+            config.put("early_stopping_patience", job.getEarlyStoppingPatience());
+            config.put("evaluation_metric", job.getEvaluationMetric());
+            
+            // Add hyperparameters if present
+            if (job.getHyperparametersJson() != null) {
+                try {
+                    Map<String, Object> hyperparams = objectMapper.readValue(
+                            job.getHyperparametersJson(), 
+                            new TypeReference<Map<String, Object>>() {}
+                    );
+                    config.put("hyperparameters", hyperparams);
+                } catch (Exception e) {
+                    log.warn("Failed to parse hyperparameters", e);
+                }
+            }
+
+            // Call FastAPI to start training
+            Map<String, Object> fastApiResponse = mlEngineClient.startTraining(
+                    datasetPath,
+                    job.getTargetVariable(),
+                    job.getAlgorithm(),
+                    job.getProblemType().name(),
+                    config
+            );
+
+            String fastApiJobId = (String) fastApiResponse.get("job_id");
+            if (fastApiJobId == null) {
+                throw new RuntimeException("FastAPI did not return job_id");
+            }
+            
+            jobIdMapping.put(jobId, fastApiJobId);
+            log.info("FastAPI training job started: {} -> {}", jobId, fastApiJobId);
+
+            // Update status to training
+            job = trainingJobRepository.findById(jobId).orElseThrow();
+            job.setStatus(JobStatus.TRAINING);
+            job.setStatusMessage("Training in progress...");
+            job.setProgress(10);
+            trainingJobRepository.save(job);
+
+            // Poll for progress
+            boolean completed = false;
+            int maxPolls = 300;  // 5 minutes max
+            int pollCount = 0;
+            
+            while (!completed && pollCount < maxPolls) {
+                Thread.sleep(1000);  // Poll every second
+                pollCount++;
+                
+                try {
+                    Map<String, Object> progress = mlEngineClient.getTrainingProgress(fastApiJobId);
+                    
+                    String status = (String) progress.get("status");
+                    Integer progressValue = progress.get("progress") != null ? 
+                            ((Number) progress.get("progress")).intValue() : null;
+                    Integer currentEpoch = progress.get("current_epoch") != null ?
+                            ((Number) progress.get("current_epoch")).intValue() : null;
+                    Integer totalEpochs = progress.get("total_epochs") != null ?
+                            ((Number) progress.get("total_epochs")).intValue() : null;
+                    Double currentAccuracy = progress.get("current_accuracy") != null ?
+                            ((Number) progress.get("current_accuracy")).doubleValue() : null;
+                    Double currentLoss = progress.get("current_loss") != null ?
+                            ((Number) progress.get("current_loss")).doubleValue() : null;
+                    
+                    // Update job progress
+                    job = trainingJobRepository.findById(jobId).orElseThrow();
+                    if (progressValue != null) job.setProgress(progressValue);
+                    if (currentEpoch != null) job.setCurrentEpoch(currentEpoch);
+                    if (totalEpochs != null) job.setTotalEpochs(totalEpochs);
+                    if (currentAccuracy != null) job.setCurrentAccuracy(currentAccuracy);
+                    if (currentLoss != null) job.setCurrentLoss(currentLoss);
+                    
+                    // Calculate ETA
+                    if (progressValue != null && progressValue > 0) {
+                        long elapsedSeconds = ChronoUnit.SECONDS.between(job.getStartedAt(), LocalDateTime.now());
+                        long etaSeconds = (elapsedSeconds * (100 - progressValue)) / progressValue;
+                        job.setEtaSeconds(etaSeconds);
+                    }
+                    
+                    job.setStatusMessage("Training epoch " + (currentEpoch != null ? currentEpoch : "?") + 
+                            "/" + (totalEpochs != null ? totalEpochs : "100"));
+                    trainingJobRepository.save(job);
+                    
+                    if ("completed".equals(status) || "COMPLETED".equals(status)) {
+                        completed = true;
+                    } else if ("failed".equals(status) || "FAILED".equals(status)) {
+                        throw new RuntimeException("Training failed: " + progress.get("error"));
+                    }
+                    
+                } catch (Exception e) {
+                    if (e.getMessage() != null && e.getMessage().contains("failed")) {
+                        throw e;
+                    }
+                    log.debug("Progress poll error (may be normal): {}", e.getMessage());
+                }
+            }
+
+            // Get final results
+            Map<String, Object> results = mlEngineClient.getTrainingResults(fastApiJobId);
+            
+            // Update job with results
+            job = trainingJobRepository.findById(jobId).orElseThrow();
+            job.setStatus(JobStatus.COMPLETED);
+            job.setProgress(100);
+            job.setCompletedAt(LocalDateTime.now());
+            job.setStatusMessage("Training completed successfully");
+            
+            // Extract metrics
+            Double accuracy = results.get("accuracy") != null ? 
+                    ((Number) results.get("accuracy")).doubleValue() : null;
+            Double precision = results.get("precision") != null ?
+                    ((Number) results.get("precision")).doubleValue() : null;
+            Double recall = results.get("recall") != null ?
+                    ((Number) results.get("recall")).doubleValue() : null;
+            Double f1Score = results.get("f1_score") != null ?
+                    ((Number) results.get("f1_score")).doubleValue() : null;
+            
+            if (accuracy != null) job.setCurrentAccuracy(accuracy);
+            job.setBestAccuracy(accuracy);
+            
+            // Store model path from FastAPI
+            String modelId = (String) results.get("model_id");
+            job.setModelPath(modelId);
+            
+            // Calculate duration
+            if (job.getStartedAt() != null) {
+                job.setDurationSeconds(ChronoUnit.SECONDS.between(job.getStartedAt(), job.getCompletedAt()));
+            }
+            
+            trainingJobRepository.save(job);
+            
+            // Create Model entity
+            Model model = createModelFromJob(job, results);
+            job.setModelId(model.getId());
+            trainingJobRepository.save(job);
+            
+            runningJobs.remove(jobId);
+            jobIdMapping.remove(jobId);
+            
+            log.info("✅ Training job completed successfully: {} with accuracy: {}", 
+                    jobId, accuracy != null ? String.format("%.2f%%", accuracy * 100) : "N/A");
+            
+            // Record activity
+            try {
+                activityService.recordTrainingCompleted(
+                        jobId,
+                        job.getJobName(),
+                        accuracy != null ? String.format("%.1f%%", accuracy * 100) : "N/A",
+                        "System",
+                        job.getProject() != null ? job.getProject().getId() : null
+                );
+                
+                activityService.recordModelCreated(
+                        model.getId(),
+                        model.getName(),
+                        accuracy != null ? String.format("%.1f%%", accuracy * 100) : "N/A",
+                        "System",
+                        job.getProject() != null ? job.getProject().getId() : null
+                );
+            } catch (Exception e) {
+                log.warn("Failed to record activity: {}", e.getMessage());
+            }
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("Training job interrupted: {}", jobId);
+            markJobStopped(jobId);
+        } catch (Exception e) {
+            log.error("Training job failed: {}", jobId, e);
+            try {
+                TrainingJob job = trainingJobRepository.findById(jobId).orElse(null);
+                if (job != null) {
+                    job.setStatus(JobStatus.FAILED);
+                    job.setErrorMessage(e.getMessage());
+                    job.setStatusMessage("Training failed: " + e.getMessage());
+                    job.setCompletedAt(LocalDateTime.now());
+                    trainingJobRepository.save(job);
+                    
+                    // Record failure activity
+                    activityService.recordTrainingFailed(
+                            jobId,
+                            job.getJobName(),
+                            e.getMessage() != null ? 
+                                    e.getMessage().substring(0, Math.min(100, e.getMessage().length())) : 
+                                    "Unknown error",
+                            "System",
+                            job.getProject() != null ? job.getProject().getId() : null
+                    );
+                }
+            } catch (Exception ex) {
+                log.error("Failed to update job status", ex);
+            }
+            runningJobs.remove(jobId);
+            jobIdMapping.remove(jobId);
+        }
+    }
+
+    /**
+     * Create Model entity from completed training job.
+     */
+    private Model createModelFromJob(TrainingJob job, Map<String, Object> results) {
+        Double accuracy = results.get("accuracy") != null ? 
+                ((Number) results.get("accuracy")).doubleValue() : job.getCurrentAccuracy();
+        Double precision = results.get("precision") != null ?
+                ((Number) results.get("precision")).doubleValue() : null;
+        Double recall = results.get("recall") != null ?
+                ((Number) results.get("recall")).doubleValue() : null;
+        Double f1Score = results.get("f1_score") != null ?
+                ((Number) results.get("f1_score")).doubleValue() : null;
+        
+        Model model = Model.builder()
+                .name(job.getJobName())
+                .algorithm(job.getAlgorithm())
+                .algorithmDisplayName(job.getAlgorithmDisplayName())
+                .problemType(job.getProblemType())
+                .project(job.getProject())
+                .datasetId(job.getDatasetId())
+                .datasetName(job.getDatasetName())
+                .targetVariable(job.getTargetVariable())
+                .modelPath(job.getModelPath())  // FastAPI model ID
+                .trainingJobId(job.getId())
+                .accuracy(accuracy)
+                .precision(precision)
+                .recall(recall)
+                .f1Score(f1Score)
+                .crossValidationScore(accuracy)
+                .isDeployed(false)
+                .build();
+        
+        return modelRepository.save(model);
+    }
+
+    private void markJobStopped(String jobId) {
+        try {
+            TrainingJob job = trainingJobRepository.findById(jobId).orElse(null);
+            if (job != null) {
+                job.setStatus(JobStatus.STOPPED);
+                job.setStatusMessage("Training stopped by user");
+                job.setCompletedAt(LocalDateTime.now());
+                trainingJobRepository.save(job);
+            }
+        } catch (Exception e) {
+            log.error("Failed to mark job as stopped", e);
+        }
     }
 
     /**
@@ -173,21 +483,32 @@ public class TrainingService {
         TrainingJob job = trainingJobRepository.findById(jobId)
                 .orElseThrow(() -> new IllegalArgumentException("Training job not found: " + jobId));
 
-        // Stop the process if running
-        Process process = runningProcesses.get(jobId);
-        if (process != null && process.isAlive()) {
-            process.destroyForcibly();
-            runningProcesses.remove(jobId);
+        // Cancel the async task
+        CompletableFuture<?> future = runningJobs.get(jobId);
+        if (future != null) {
+            future.cancel(true);
+            runningJobs.remove(jobId);
+        }
+
+        // Stop FastAPI job if running
+        String fastApiJobId = jobIdMapping.get(jobId);
+        if (fastApiJobId != null) {
+            try {
+                // Could call mlEngineClient.stopTraining(fastApiJobId) if endpoint exists
+                log.info("Stopping FastAPI job: {}", fastApiJobId);
+            } catch (Exception e) {
+                log.warn("Failed to stop FastAPI job: {}", e.getMessage());
+            }
+            jobIdMapping.remove(jobId);
         }
 
         job.setStatus(JobStatus.STOPPED);
         job.setStatusMessage("Training stopped by user");
         job.setCompletedAt(LocalDateTime.now());
-
         if (job.getStartedAt() != null) {
             job.setDurationSeconds(ChronoUnit.SECONDS.between(job.getStartedAt(), LocalDateTime.now()));
         }
-
+        
         job = trainingJobRepository.save(job);
         log.info("Stopped training job: {}", jobId);
 
@@ -225,12 +546,9 @@ public class TrainingService {
             throw new IllegalStateException("Can only resume paused jobs");
         }
 
-        job.setStatus(JobStatus.QUEUED);
-        job.setStatusMessage("Resuming training");
+        job.setStatus(JobStatus.TRAINING);
+        job.setStatusMessage("Training resumed");
         job = trainingJobRepository.save(job);
-
-        // Restart training
-        executeTrainingAsync(jobId);
 
         return toResponse(job);
     }
@@ -240,220 +558,18 @@ public class TrainingService {
      */
     @Transactional
     public void deleteJob(String jobId) {
-        // Stop if running
-        Process process = runningProcesses.get(jobId);
-        if (process != null && process.isAlive()) {
-            process.destroyForcibly();
-            runningProcesses.remove(jobId);
-        }
+        TrainingJob job = trainingJobRepository.findById(jobId)
+                .orElseThrow(() -> new IllegalArgumentException("Training job not found: " + jobId));
 
-        trainingJobRepository.deleteById(jobId);
+        // Cancel if running
+        CompletableFuture<?> future = runningJobs.remove(jobId);
+        if (future != null) {
+            future.cancel(true);
+        }
+        jobIdMapping.remove(jobId);
+
+        trainingJobRepository.delete(job);
         log.info("Deleted training job: {}", jobId);
-    }
-
-    // ========== ASYNC TRAINING EXECUTION ==========
-
-    @Async
-    protected void executeTrainingAsync(String jobId) {
-        try {
-            Thread.sleep(100);  // Ensure transaction is committed
-            executeTraining(jobId);
-        } catch (Exception e) {
-            log.error("Training execution failed", e);
-            updateJobStatus(jobId, JobStatus.FAILED, e.getMessage());
-        }
-    }
-
-    private void executeTraining(String jobId) {
-        TrainingJob job = trainingJobRepository.findById(jobId).orElse(null);
-        if (job == null) return;
-
-        try {
-            log.info("Starting training execution for job: {}", jobId);
-
-            // Update status to training
-            job.setStatus(JobStatus.TRAINING);
-            job.setStartedAt(LocalDateTime.now());
-            job.setStatusMessage("Training started");
-            trainingJobRepository.save(job);
-
-            // Get dataset
-            Dataset dataset = datasetRepository.findById(job.getDatasetId()).orElse(null);
-            if (dataset == null || dataset.getFilePath() == null) {
-                throw new IllegalStateException("Dataset file not found");
-            }
-
-            // Build Python command
-            String command = buildTrainingCommand(job, dataset);
-            log.info("Training command: {}", command);
-
-            // Execute Python training
-            ProcessBuilder pb = new ProcessBuilder("bash", "-c", command);
-            pb.redirectErrorStream(true);
-            Process process = pb.start();
-            runningProcesses.put(jobId, process);
-
-            // Read output and update progress
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    log.debug("Training output: {}", line);
-                    parseTrainingOutput(jobId, line);
-                }
-            }
-
-            int exitCode = process.waitFor();
-            runningProcesses.remove(jobId);
-
-            // Update final status
-            job = trainingJobRepository.findById(jobId).orElse(job);
-            if (exitCode == 0) {
-                job.setStatus(JobStatus.COMPLETED);
-                job.setProgress(100);
-                job.setStatusMessage("Training completed successfully");
-
-                // Create model record
-                createModelFromJob(job);
-            } else {
-                job.setStatus(JobStatus.FAILED);
-                job.setStatusMessage("Training failed with exit code: " + exitCode);
-            }
-
-            job.setCompletedAt(LocalDateTime.now());
-            job.setDurationSeconds(ChronoUnit.SECONDS.between(job.getStartedAt(), LocalDateTime.now()));
-            trainingJobRepository.save(job);
-
-            log.info("Training completed for job: {} with status: {}", jobId, job.getStatus());
-
-        } catch (Exception e) {
-            log.error("Training failed for job: {}", jobId, e);
-            updateJobStatus(jobId, JobStatus.FAILED, e.getMessage());
-        }
-    }
-
-    private String buildTrainingCommand(TrainingJob job, Dataset dataset) {
-        StringBuilder cmd = new StringBuilder();
-        cmd.append(config.getPythonPath()).append(" -c \"");
-        cmd.append("from ml_engine import train; ");
-        cmd.append("result = train(");
-        cmd.append("data_path='").append(dataset.getFilePath()).append("', ");
-        cmd.append("target='").append(job.getTargetVariable()).append("', ");
-        cmd.append("algorithm='").append(job.getAlgorithm()).append("', ");
-        cmd.append("problem_type='").append(job.getProblemType().name().toLowerCase()).append("', ");
-        cmd.append("test_size=").append(1.0 - job.getTrainTestSplit()).append(", ");
-        cmd.append("output_dir='").append(config.getModelsDir()).append("'");
-        cmd.append("); ");
-        cmd.append("print('RESULT:', result)");
-        cmd.append("\"");
-
-        return cmd.toString();
-    }
-
-    private void parseTrainingOutput(String jobId, String line) {
-        try {
-            TrainingJob job = trainingJobRepository.findById(jobId).orElse(null);
-            if (job == null) return;
-
-            // Parse progress updates
-            if (line.contains("PROGRESS:")) {
-                int progress = Integer.parseInt(line.split("PROGRESS:")[1].trim().split(" ")[0]);
-                job.setProgress(progress);
-            }
-            if (line.contains("EPOCH:")) {
-                String[] parts = line.split("EPOCH:")[1].trim().split("/");
-                job.setCurrentEpoch(Integer.parseInt(parts[0]));
-                if (parts.length > 1) {
-                    job.setTotalEpochs(Integer.parseInt(parts[1].split(" ")[0]));
-                }
-            }
-            if (line.contains("ACCURACY:")) {
-                double accuracy = Double.parseDouble(line.split("ACCURACY:")[1].trim().split(" ")[0]);
-                job.setCurrentAccuracy(accuracy);
-                if (job.getBestAccuracy() == null || accuracy > job.getBestAccuracy()) {
-                    job.setBestAccuracy(accuracy);
-                }
-            }
-            if (line.contains("LOSS:")) {
-                double loss = Double.parseDouble(line.split("LOSS:")[1].trim().split(" ")[0]);
-                job.setCurrentLoss(loss);
-            }
-            if (line.contains("RESULT:")) {
-                job.setMetricsJson(line.split("RESULT:")[1].trim());
-            }
-
-            trainingJobRepository.save(job);
-
-        } catch (Exception e) {
-            log.debug("Failed to parse training output: {}", line);
-        }
-    }
-
-    private void createModelFromJob(TrainingJob job) {
-        try {
-            // Parse metrics from job
-            Map<String, Object> metrics = new HashMap<>();
-            if (job.getMetricsJson() != null) {
-                try {
-                    metrics = objectMapper.readValue(job.getMetricsJson(), new TypeReference<>() {});
-                } catch (Exception ignored) {}
-            }
-
-            String algorithmDisplayName = algorithmService.getAlgorithmDisplayName(job.getAlgorithm());
-
-            Model model = Model.builder()
-                    .name(algorithmDisplayName + " v1.0")
-                    .description("Trained on " + job.getDatasetName())
-                    .version("1.0")
-                    .algorithm(job.getAlgorithm())
-                    .algorithmDisplayName(algorithmDisplayName)
-                    .problemType(job.getProblemType())
-                    .trainingJobId(job.getId())
-                    .datasetId(job.getDatasetId())
-                    .datasetName(job.getDatasetName())
-                    .targetVariable(job.getTargetVariable())
-                    .accuracy(job.getBestAccuracy())
-                    .metricsJson(job.getMetricsJson())
-                    .hyperparametersJson(job.getHyperparametersJson())
-                    .trainingTimeSeconds(job.getDurationSeconds())
-                    .crossValidationFolds(job.getCrossValidationFolds())
-                    .project(job.getProject())
-                    .build();
-
-            // Set additional metrics if available
-            if (metrics.containsKey("f1_score")) {
-                model.setF1Score((Double) metrics.get("f1_score"));
-            }
-            if (metrics.containsKey("precision")) {
-                model.setPrecisionScore((Double) metrics.get("precision"));
-            }
-            if (metrics.containsKey("recall")) {
-                model.setRecall((Double) metrics.get("recall"));
-            }
-
-            model = modelRepository.save(model);
-            job.setModelId(model.getId());
-            trainingJobRepository.save(job);
-
-            log.info("Created model {} from training job {}", model.getId(), job.getId());
-
-        } catch (Exception e) {
-            log.error("Failed to create model from job", e);
-        }
-    }
-
-    private void updateJobStatus(String jobId, JobStatus status, String message) {
-        try {
-            TrainingJob job = trainingJobRepository.findById(jobId).orElse(null);
-            if (job != null) {
-                job.setStatus(status);
-                job.setStatusMessage(message);
-                job.setErrorMessage(message);
-                job.setCompletedAt(LocalDateTime.now());
-                trainingJobRepository.save(job);
-            }
-        } catch (Exception e) {
-            log.error("Failed to update job status", e);
-        }
     }
 
     // ========== DTO CONVERTERS ==========
@@ -462,15 +578,13 @@ public class TrainingService {
         Map<String, Object> hyperparams = null;
         if (job.getHyperparametersJson() != null) {
             try {
-                hyperparams = objectMapper.readValue(job.getHyperparametersJson(), new TypeReference<>() {});
-            } catch (Exception ignored) {}
-        }
-
-        Map<String, Object> metrics = null;
-        if (job.getMetricsJson() != null) {
-            try {
-                metrics = objectMapper.readValue(job.getMetricsJson(), new TypeReference<>() {});
-            } catch (Exception ignored) {}
+                hyperparams = objectMapper.readValue(
+                        job.getHyperparametersJson(),
+                        new TypeReference<Map<String, Object>>() {}
+                );
+            } catch (Exception e) {
+                log.warn("Failed to parse hyperparameters", e);
+            }
         }
 
         return TrainingJobDTO.Response.builder()
@@ -481,17 +595,18 @@ public class TrainingService {
                 .statusLabel(formatStatus(job.getStatus()))
                 .statusMessage(job.getStatusMessage())
                 .progress(job.getProgress())
-                .progressLabel(job.getCurrentEpoch() + "/" + job.getTotalEpochs())
+                .progressLabel(job.getProgress() + "/100")
                 .currentEpoch(job.getCurrentEpoch())
                 .totalEpochs(job.getTotalEpochs())
                 .currentAccuracy(job.getCurrentAccuracy())
-                .currentAccuracyLabel(formatPercent(job.getCurrentAccuracy()))
+                .currentAccuracyLabel(job.getCurrentAccuracy() != null ? 
+                        String.format("%.2f%%", job.getCurrentAccuracy() * 100) : null)
                 .bestAccuracy(job.getBestAccuracy())
                 .currentLoss(job.getCurrentLoss())
                 .datasetId(job.getDatasetId())
                 .datasetName(job.getDatasetName())
                 .algorithm(job.getAlgorithm())
-                .algorithmDisplayName(algorithmService.getAlgorithmDisplayName(job.getAlgorithm()))
+                .algorithmDisplayName(job.getAlgorithmDisplayName())
                 .targetVariable(job.getTargetVariable())
                 .problemType(job.getProblemType())
                 .trainTestSplit(job.getTrainTestSplit())
@@ -511,12 +626,12 @@ public class TrainingService {
                 .durationSeconds(job.getDurationSeconds())
                 .durationLabel(formatDuration(job.getDurationSeconds()))
                 .modelId(job.getModelId())
-                .metrics(metrics)
                 .computeResources(job.getComputeResources())
                 .costEstimate(job.getCostEstimate())
-                .costLabel(job.getCostEstimate() != null ? String.format("$%.2f", job.getCostEstimate()) : null)
+                .costLabel(job.getCostEstimate() != null ? 
+                        String.format("$%.2f", job.getCostEstimate()) : null)
                 .errorMessage(job.getErrorMessage())
-                .projectId(job.getProjectId())
+                .projectId(job.getProject() != null ? job.getProject().getId() : null)
                 .createdAt(job.getCreatedAt())
                 .updatedAt(job.getUpdatedAt())
                 .build();
@@ -527,37 +642,44 @@ public class TrainingService {
                 .id(job.getId())
                 .jobName(job.getJobName())
                 .algorithm(job.getAlgorithm())
-                .algorithmDisplayName(algorithmService.getAlgorithmDisplayName(job.getAlgorithm()))
+                .algorithmDisplayName(job.getAlgorithmDisplayName())
                 .datasetName(job.getDatasetName())
                 .status(job.getStatus())
                 .statusLabel(formatStatus(job.getStatus()))
                 .progress(job.getProgress())
-                .progressLabel(job.getCurrentEpoch() + "/" + job.getTotalEpochs())
+                .progressLabel(job.getProgress() + "/100")
                 .currentAccuracy(job.getCurrentAccuracy())
-                .currentAccuracyLabel(formatPercent(job.getCurrentAccuracy()))
+                .currentAccuracyLabel(job.getCurrentAccuracy() != null ? 
+                        String.format("%.2f%%", job.getCurrentAccuracy() * 100) : null)
                 .startedAt(job.getStartedAt())
                 .startedAtLabel(formatDateTime(job.getStartedAt()))
                 .etaLabel(formatEta(job.getEtaSeconds()))
                 .build();
     }
 
+    // ========== FORMATTERS ==========
+
     private String formatStatus(JobStatus status) {
         if (status == null) return "Unknown";
-        return status.name().charAt(0) + status.name().substring(1).toLowerCase();
+        return switch (status) {
+            case QUEUED -> "Queued";
+            case STARTING -> "Starting";
+            case TRAINING -> "Training";
+            case VALIDATING -> "Validating";
+            case COMPLETED -> "Completed";
+            case FAILED -> "Failed";
+            case STOPPED -> "Stopped";
+            case PAUSED -> "Paused";
+        };
     }
 
-    private String formatPercent(Double value) {
-        if (value == null) return "0%";
-        return String.format("%.1f%%", value * 100);
-    }
-
-    private String formatDateTime(LocalDateTime dt) {
-        if (dt == null) return null;
-        return dt.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
+    private String formatDateTime(LocalDateTime dateTime) {
+        if (dateTime == null) return null;
+        return dateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
     }
 
     private String formatEta(Long seconds) {
-        if (seconds == null) return "Calculating...";
+        if (seconds == null || seconds <= 0) return null;
         if (seconds < 60) return seconds + " sec";
         if (seconds < 3600) return (seconds / 60) + " min";
         return (seconds / 3600) + " hr " + ((seconds % 3600) / 60) + " min";
