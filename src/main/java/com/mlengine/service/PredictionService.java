@@ -2,6 +2,7 @@ package com.mlengine.service;
 
 import com.mlengine.client.MLEngineClient;
 import com.mlengine.model.dto.PredictionDTO;
+import com.mlengine.model.entity.Activity;
 import com.mlengine.model.entity.BatchPredictionJob;
 import com.mlengine.model.entity.Model;
 import com.mlengine.model.entity.Prediction;
@@ -38,6 +39,7 @@ public class PredictionService {
     private final BatchPredictionJobRepository batchJobRepository;
     private final ModelRepository modelRepository;
     private final MLEngineClient mlEngineClient;
+    private final ActivityService activityService;
 
     // ========== SINGLE PREDICTION ==========
 
@@ -127,6 +129,7 @@ public class PredictionService {
             Prediction prediction = Prediction.builder()
                     .modelId(model.getId())
                     .modelName(model.getName())
+                    .projectId(model.getProject() != null ? model.getProject().getId() : null)
                     .predictionType("single")
                     .inputJson(request.getFeatures().toString())
                     .predictedClass(predictedClass)
@@ -135,6 +138,21 @@ public class PredictionService {
                     .processingTimeMs(processingTime)
                     .build();
             prediction = predictionRepository.save(prediction);
+            
+            // Record activity for prediction
+            try {
+                activityService.recordActivity(
+                        Activity.ActivityType.PREDICTION_SINGLE,
+                        "Prediction made",
+                        model.getName() + " - " + predictedClass,
+                        "System", null,
+                        prediction.getId(), "PREDICTION", model.getName(),
+                        model.getProject() != null ? model.getProject().getId() : null,
+                        null
+                );
+            } catch (Exception activityEx) {
+                log.warn("Failed to record prediction activity: {}", activityEx.getMessage());
+            }
 
             log.info("✅ REAL prediction complete: {} with confidence {}", predictedClass, confidence);
 
@@ -261,20 +279,46 @@ public class PredictionService {
             @SuppressWarnings("unchecked")
             List<Map<String, Object>> predictions = (List<Map<String, Object>>) batchResponse.get("predictions");
 
-            // Save results to CSV
+            // Save results to CSV and to database
             Path outputDir = Path.of(System.getProperty("java.io.tmpdir"), "ml-predictions");
             Files.createDirectories(outputDir);
             Path outputFile = outputDir.resolve("predictions_" + jobId + ".csv");
+            
+            // Get projectId from model or job
+            String projectId = job.getProjectId();
+            if (projectId == null && model.getProject() != null) {
+                projectId = model.getProject().getId();
+            }
 
             try (PrintWriter writer = new PrintWriter(outputFile.toFile())) {
                 writer.println("index,prediction,probability,confidence");
                 for (int i = 0; i < predictions.size(); i++) {
                     Map<String, Object> pred = predictions.get(i);
+                    Object predValue = pred.get("prediction");
+                    Double probability = pred.get("probability") != null ? 
+                            ((Number) pred.get("probability")).doubleValue() : null;
+                    Double confidence = pred.get("confidence") != null ? 
+                            ((Number) pred.get("confidence")).doubleValue() : 0.85;
+                    
                     writer.printf("%d,%s,%.4f,%.4f%n",
                             i,
-                            pred.get("prediction"),
-                            ((Number) pred.getOrDefault("probability", 0.0)).doubleValue(),
-                            ((Number) pred.getOrDefault("confidence", 0.0)).doubleValue());
+                            predValue,
+                            probability != null ? probability : 0.0,
+                            confidence);
+                    
+                    // Save to Prediction table (for counting)
+                    Prediction prediction = Prediction.builder()
+                            .modelId(model.getId())
+                            .modelName(model.getName())
+                            .projectId(projectId)
+                            .predictionType("batch")
+                            .batchId(jobId)
+                            .batchIndex(i)
+                            .predictedClass(predValue != null ? predValue.toString() : "N/A")
+                            .probability(probability)
+                            .confidence(confidence)
+                            .build();
+                    predictionRepository.save(prediction);
                 }
             }
 
@@ -291,6 +335,19 @@ public class PredictionService {
                         java.time.Duration.between(job.getStartedAt(), job.getCompletedAt()).toMillis());
             }
             batchJobRepository.save(job);
+            
+            // Record activity
+            try {
+                activityService.recordBatchPredictionCompleted(
+                        jobId,
+                        job.getJobName(),
+                        predictions.size(),
+                        "System",
+                        projectId
+                );
+            } catch (Exception activityEx) {
+                log.warn("Failed to record batch prediction activity: {}", activityEx.getMessage());
+            }
 
             log.info("✅ Batch prediction completed: {} records", predictions.size());
 
