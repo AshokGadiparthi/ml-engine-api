@@ -490,29 +490,30 @@ public class TrainingService {
                 .precisionScore(precision)
                 .recall(recall)
                 .f1Score(f1Score)
-                // ========== AUTO-DEPLOY LIKE AUTOML ==========
-                .isDeployed(true)                   // AUTO-DEPLOY: Same as AutoML!
-                .isProductionReady(true)            // Ready for predictions
+                // ========== NOT AUTO-DEPLOYED - User must click Deploy ==========
+                .isDeployed(false)                  // NOT deployed yet!
+                .isProductionReady(true)            // Ready for deployment
                 .isBest(false)                      // Can be set later via API
-                .deployedAt(LocalDateTime.now())    // Set deployment timestamp
-                .endpointUrl("/api/predictions/realtime/" + job.getModelPath())  // Set endpoint
+                .deployedAt(null)                   // Not deployed yet
+                .endpointUrl(null)                  // No endpoint yet
                 .build();
         
         Model savedModel = modelRepository.save(model);
-        log.info("✅ Created & Auto-Deployed TRAINING Model: {} (name: {}) with modelPath: {} for project: {}", 
+        log.info("✅ Created TRAINING Model (NOT deployed): {} (name: {}) with modelPath: {} for project: {}", 
                 savedModel.getId(), savedModel.getName(), savedModel.getModelPath(), 
                 project != null ? project.getId() : "none");
         
-        // Record deployment activity (same as AutoML)
+        // Record model creation activity (NOT deployment)
         try {
-            activityService.recordModelDeployed(
+            activityService.recordModelCreated(
                     savedModel.getId(),
                     savedModel.getName(),
+                    savedModel.getAccuracy(),
                     "System",
                     project != null ? project.getId() : null
             );
         } catch (Exception e) {
-            log.warn("Failed to record deployment activity: {}", e.getMessage());
+            log.warn("Failed to record model creation activity: {}", e.getMessage());
         }
         
         return savedModel;
