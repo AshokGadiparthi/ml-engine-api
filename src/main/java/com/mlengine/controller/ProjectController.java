@@ -66,4 +66,11 @@ public class ProjectController {
     public ResponseEntity<ProjectDTO.DashboardStats> getDashboardStats(@PathVariable String id) {
         return ResponseEntity.ok(projectService.getDashboardStats(id));
     }
+    
+    @PostMapping("/{id}/refresh-stats")
+    @Operation(summary = "Refresh project statistics",
+               description = "Recalculates all project stats (models, datasets, datasources). Call after training/upload completes.")
+    public ResponseEntity<ProjectDTO.Response> refreshStats(@PathVariable String id) {
+        return ResponseEntity.ok(projectService.refreshProjectStats(id));
+    }
 }

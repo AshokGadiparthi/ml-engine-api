@@ -97,9 +97,11 @@ public class ProjectService {
         
         Integer datasetsCount = datasetRepository.countActiveByProjectId(projectId);
         Integer modelsCount = modelRepository.countByProject(projectId);
+        Integer dataSourcesCount = dataSourceRepository.countByProjectId(projectId);  // Count ALL datasources
         
         project.setDatasetsCount(datasetsCount != null ? datasetsCount : 0);
         project.setModelsCount(modelsCount != null ? modelsCount : 0);
+        project.setDataSourcesCount(dataSourcesCount != null ? dataSourcesCount : 0);
         
         projectRepository.save(project);
     }
@@ -160,6 +162,24 @@ public class ProjectService {
         projectRepository.save(project);
         log.info("Deleted project: {}", id);
     }
+    
+    /**
+     * Refresh project statistics on demand.
+     * Called by frontend after operations complete to get updated counts.
+     */
+    @Transactional
+    public ProjectDTO.Response refreshProjectStats(String projectId) {
+        Project project = projectRepository.findById(projectId)
+                .orElseThrow(() -> new IllegalArgumentException("Project not found: " + projectId));
+
+        // Force recalculate all stats
+        updateProjectStats(project);
+        
+        log.info("Refreshed stats for project {}: models={}, datasets={}, datasources={}", 
+                projectId, project.getModelsCount(), project.getDatasetsCount(), project.getDataSourcesCount());
+
+        return toResponse(project);
+    }
 
     /**
      * Get dashboard statistics for a project.
@@ -174,6 +194,7 @@ public class ProjectService {
                 .modelsCount(project.getModelsCount())
                 .deployedModelsCount(project.getDeployedModelsCount())
                 .datasetsCount(project.getDatasetsCount())
+                .dataSourcesCount(project.getDataSourcesCount())
                 .totalDataSize(formatFileSize(project.getTotalDataSizeBytes()))
                 .totalDataSizeBytes(project.getTotalDataSizeBytes())
                 .avgAccuracy(project.getAvgAccuracy())
@@ -202,6 +223,10 @@ public class ProjectService {
         Integer deployedModelsCount = modelRepository.countDeployedByProject(projectId);
         project.setModelsCount(modelsCount != null ? modelsCount : 0);
         project.setDeployedModelsCount(deployedModelsCount != null ? deployedModelsCount : 0);
+        
+        // Update datasource count
+        Integer dataSourcesCount = dataSourceRepository.countByProjectId(projectId);  // Count ALL datasources
+        project.setDataSourcesCount(dataSourcesCount != null ? dataSourcesCount : 0);
         
         // Update average accuracy
         Double avgAccuracy = modelRepository.avgAccuracyByProject(projectId);
@@ -239,6 +264,7 @@ public class ProjectService {
                 .modelsCount(project.getModelsCount())
                 .deployedModelsCount(project.getDeployedModelsCount())
                 .datasetsCount(project.getDatasetsCount())
+                .dataSourcesCount(project.getDataSourcesCount())
                 .totalDataSize(formatFileSize(project.getTotalDataSizeBytes()))
                 .totalDataSizeBytes(project.getTotalDataSizeBytes())
                 .avgAccuracy(project.getAvgAccuracy())
@@ -260,6 +286,7 @@ public class ProjectService {
                 .status(project.getStatus())
                 .modelsCount(project.getModelsCount())
                 .datasetsCount(project.getDatasetsCount())
+                .dataSourcesCount(project.getDataSourcesCount())
                 .updatedAt(project.getUpdatedAt())
                 .build();
     }

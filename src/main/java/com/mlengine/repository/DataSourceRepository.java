@@ -27,6 +27,9 @@ public interface DataSourceRepository extends JpaRepository<DataSource, String> 
 
     @Query("SELECT COUNT(ds) FROM DataSource ds WHERE ds.projectId = :projectId AND ds.status = 'CONNECTED'")
     Integer countConnectedByProjectId(@Param("projectId") String projectId);
+    
+    @Query("SELECT COUNT(ds) FROM DataSource ds WHERE ds.projectId = :projectId")
+    Integer countByProjectId(@Param("projectId") String projectId);
 
     boolean existsByNameIgnoreCaseAndProjectId(String name, String projectId);
 }

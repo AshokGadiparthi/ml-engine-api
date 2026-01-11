@@ -65,6 +65,10 @@ public class Project {
     @Builder.Default
     private Integer datasetsCount = 0;
 
+    @Column(name = "data_sources_count")
+    @Builder.Default
+    private Integer dataSourcesCount = 0;
+
     @Column(name = "total_data_size_bytes")
     @Builder.Default
     private Long totalDataSizeBytes = 0L;

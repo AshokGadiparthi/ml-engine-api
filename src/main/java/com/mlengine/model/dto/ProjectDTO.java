@@ -73,6 +73,7 @@ public class ProjectDTO {
         private Integer modelsCount;
         private Integer deployedModelsCount;
         private Integer datasetsCount;
+        private Integer dataSourcesCount;
         private String totalDataSize;  // Formatted: "2.4 GB"
         private Long totalDataSizeBytes;
         private Double avgAccuracy;
@@ -101,6 +102,7 @@ public class ProjectDTO {
         private ProjectStatus status;
         private Integer modelsCount;
         private Integer datasetsCount;
+        private Integer dataSourcesCount;
         private LocalDateTime updatedAt;
     }
 
@@ -120,6 +122,9 @@ public class ProjectDTO {
         private Integer datasetsCount;
         private String totalDataSize;
         private Long totalDataSizeBytes;
+        
+        // Data Sources
+        private Integer dataSourcesCount;
 
         // Accuracy
         private Double avgAccuracy;
