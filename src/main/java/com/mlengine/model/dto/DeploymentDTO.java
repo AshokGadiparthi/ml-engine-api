@@ -54,6 +54,24 @@ public class DeploymentDTO {
     }
 
     /**
+     * Request to deploy from Training job.
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class DeployFromTrainingRequest {
+        @NotBlank(message = "Training Job ID is required")
+        private String trainingJobId;
+
+        private String name;
+
+        private String description;
+
+        private String deployedBy;
+    }
+
+    /**
      * Request to rollback/activate a specific version.
      */
     @Data
@@ -92,6 +110,7 @@ public class DeploymentDTO {
         private String projectName;
         private String modelId;
         private String autoMLJobId;
+        private String trainingJobId;  // For models from manual training
 
         // Versioning
         private Integer version;
@@ -165,6 +184,9 @@ public class DeploymentDTO {
         // Source
         private String autoMLJobId;
         private String autoMLJobName;
+        private String trainingJobId;   // For models from manual training
+        private String trainingJobName;
+        private String source;          // "AUTOML" or "TRAINING"
 
         // Endpoint
         private String endpointPath;

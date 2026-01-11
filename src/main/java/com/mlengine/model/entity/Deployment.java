@@ -43,6 +43,10 @@ public class Deployment {
     @JoinColumn(name = "automl_job_id")
     private AutoMLJob autoMLJob;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "training_job_id")
+    private TrainingJob trainingJob;
+
     // Versioning - auto-incremented per project
     @Column(nullable = false)
     private Integer version;

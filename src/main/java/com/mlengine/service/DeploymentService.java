@@ -5,6 +5,7 @@ import com.mlengine.model.entity.AutoMLJob;
 import com.mlengine.model.entity.Deployment;
 import com.mlengine.model.entity.Model;
 import com.mlengine.model.entity.Project;
+import com.mlengine.model.entity.TrainingJob;
 import com.mlengine.model.enums.DeploymentStatus;
 import com.mlengine.model.enums.JobStatus;
 import com.mlengine.model.enums.ProblemType;
@@ -12,6 +13,7 @@ import com.mlengine.repository.AutoMLJobRepository;
 import com.mlengine.repository.DeploymentRepository;
 import com.mlengine.repository.ModelRepository;
 import com.mlengine.repository.ProjectRepository;
+import com.mlengine.repository.TrainingJobRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -36,6 +38,7 @@ public class DeploymentService {
     private final DeploymentRepository deploymentRepository;
     private final ModelRepository modelRepository;
     private final AutoMLJobRepository autoMLJobRepository;
+    private final TrainingJobRepository trainingJobRepository;
     private final ProjectRepository projectRepository;
 
     /**
@@ -114,6 +117,107 @@ public class DeploymentService {
 
         log.info("Created deployment {} (v{}) for project {}", 
                 deployment.getId(), deployment.getVersion(), project.getId());
+
+        return toResponse(deployment, "Model deployed successfully as v" + nextVersion);
+    }
+
+    /**
+     * Deploy a model from Training job.
+     * Same as AutoML but for manual training jobs.
+     */
+    @Transactional
+    public DeploymentDTO.Response deployFromTraining(String trainingJobId, DeploymentDTO.DeployFromTrainingRequest request) {
+        log.info("Deploying model from Training job: {}", trainingJobId);
+
+        // Get Training job
+        TrainingJob job = trainingJobRepository.findById(trainingJobId)
+                .orElseThrow(() -> new IllegalArgumentException("Training job not found: " + trainingJobId));
+
+        if (job.getStatus() != JobStatus.COMPLETED) {
+            throw new IllegalStateException("Can only deploy from completed Training jobs. Current status: " + job.getStatus());
+        }
+
+        // Get model from job
+        Model model = null;
+        if (job.getModelId() != null) {
+            model = modelRepository.findById(job.getModelId()).orElse(null);
+        }
+        
+        if (model == null) {
+            throw new IllegalStateException("Training job has no associated model. Model may not have been created.");
+        }
+
+        // Get project - try multiple sources
+        Project project = model.getProject();
+        if (project == null) {
+            String projectId = job.getProjectIdValue();
+            if (projectId == null) {
+                projectId = job.getProjectId();
+            }
+            if (projectId != null) {
+                project = projectRepository.findById(projectId).orElse(null);
+            }
+        }
+        
+        if (project == null) {
+            throw new IllegalStateException("Training job has no associated project");
+        }
+
+        // Deactivate current active deployment
+        deactivateCurrentActive(project.getId(), "Replaced by new deployment");
+
+        // Get next version
+        Integer nextVersion = deploymentRepository.findMaxVersionByProjectId(project.getId()) + 1;
+
+        // Create deployment name
+        String deploymentName = request.getName();
+        if (deploymentName == null || deploymentName.isBlank()) {
+            deploymentName = String.format("%s v%d - %s", 
+                    job.getAlgorithm(), nextVersion, job.getTargetVariable());
+        }
+
+        // Get score
+        Double score = job.getBestAccuracy();
+        if (score == null) {
+            score = job.getCurrentAccuracy();
+        }
+        if (score == null) {
+            score = model.getAccuracy();
+        }
+
+        // Create deployment
+        Deployment deployment = Deployment.builder()
+                .name(deploymentName)
+                .description(request.getDescription())
+                .project(project)
+                .model(model)
+                .trainingJob(job)
+                .version(nextVersion)
+                .versionLabel("v" + nextVersion)
+                .status(DeploymentStatus.ACTIVE)
+                .algorithm(job.getAlgorithm())
+                .score(score)
+                .metric("accuracy")
+                .problemType(job.getProblemType())
+                .targetColumn(job.getTargetVariable())
+                .datasetName(job.getDatasetName())
+                .endpointPath("/api/predictions/realtime/" + model.getModelPath())
+                .endpointUrl("/api/predictions/realtime/" + model.getModelPath())
+                .deployedAt(LocalDateTime.now())
+                .activatedAt(LocalDateTime.now())
+                .deployedBy(request.getDeployedBy())
+                .predictionsCount(0L)
+                .build();
+
+        deployment = deploymentRepository.save(deployment);
+
+        // Update model deployment status
+        model.setIsDeployed(true);
+        model.setDeployedAt(LocalDateTime.now());
+        modelRepository.save(model);
+
+        log.info("Created deployment {} (v{}) from Training job {} for project {}", 
+                deployment.getId(), deployment.getVersion(), trainingJobId, project.getId());
 
         return toResponse(deployment, "Model deployed successfully as v" + nextVersion);
     }
@@ -476,6 +580,7 @@ public class DeploymentService {
                 .projectName(d.getProject() != null ? d.getProject().getName() : null)
                 .modelId(d.getModel() != null ? d.getModel().getId() : null)
                 .autoMLJobId(d.getAutoMLJob() != null ? d.getAutoMLJob().getId() : null)
+                .trainingJobId(d.getTrainingJob() != null ? d.getTrainingJob().getId() : null)
                 .version(d.getVersion())
                 .versionLabel(d.getVersionLabel())
                 .status(d.getStatus())
@@ -507,6 +612,14 @@ public class DeploymentService {
      * Convert to ListItem DTO.
      */
     private DeploymentDTO.ListItem toListItem(Deployment d) {
+        // Determine source
+        String source = "UNKNOWN";
+        if (d.getAutoMLJob() != null) {
+            source = "AUTOML";
+        } else if (d.getTrainingJob() != null) {
+            source = "TRAINING";
+        }
+        
         return DeploymentDTO.ListItem.builder()
                 .id(d.getId())
                 .name(d.getName())
@@ -523,6 +636,9 @@ public class DeploymentService {
                 .problemType(d.getProblemType())
                 .autoMLJobId(d.getAutoMLJob() != null ? d.getAutoMLJob().getId() : null)
                 .autoMLJobName(d.getAutoMLJob() != null ? d.getAutoMLJob().getName() : null)
+                .trainingJobId(d.getTrainingJob() != null ? d.getTrainingJob().getId() : null)
+                .trainingJobName(d.getTrainingJob() != null ? d.getTrainingJob().getJobName() : null)
+                .source(source)
                 .endpointPath(d.getEndpointPath())
                 .deployedAt(d.getDeployedAt())
                 .deactivatedAt(d.getDeactivatedAt())

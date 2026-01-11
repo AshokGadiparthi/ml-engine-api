@@ -41,6 +41,24 @@ public class DeploymentController {
     }
 
     /**
+     * Deploy from Training job (same as AutoML but for manual training).
+     */
+    @PostMapping("/from-training/{trainingJobId}")
+    @Operation(summary = "Deploy model from Training job")
+    public ResponseEntity<DeploymentDTO.Response> deployFromTraining(
+            @PathVariable String trainingJobId,
+            @RequestBody(required = false) DeploymentDTO.DeployFromTrainingRequest request) {
+        
+        if (request == null) {
+            request = new DeploymentDTO.DeployFromTrainingRequest();
+        }
+        request.setTrainingJobId(trainingJobId);
+        
+        DeploymentDTO.Response response = deploymentService.deployFromTraining(trainingJobId, request);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
      * Deploy a model directly.
      */
     @PostMapping
