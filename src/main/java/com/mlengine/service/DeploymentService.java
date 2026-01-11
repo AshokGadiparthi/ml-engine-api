@@ -431,6 +431,9 @@ public class DeploymentService {
                 .datasetId(job.getDataset().getId())
                 .datasetName(job.getDataset().getName())
                 .targetVariable(job.getTargetColumn())
+                .modelPath(job.getModelPath())  // CRITICAL: FastAPI model ID for predictions!
+                .source("AUTOML")               // Model created via AutoML Engine
+                .sourceJobId(job.getId())       // Link to AutoML job
                 .isDeployed(false)
                 .build();
 

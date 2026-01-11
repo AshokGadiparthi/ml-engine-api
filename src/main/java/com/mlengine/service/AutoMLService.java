@@ -316,6 +316,13 @@ public class AutoMLService {
             
             autoMLJobRepository.save(job);
             
+            // AUTOMATICALLY CREATE MODEL ENTITY with FastAPI model_id
+            // This ensures predictions work immediately without manual deployment
+            Model model = createModelFromAutoMLJob(job);
+            job.setBestModel(model);
+            autoMLJobRepository.save(job);
+            log.info("📦 Auto-created Model entity: {} with FastAPI model_id: {}", model.getId(), model.getModelPath());
+            
             runningJobs.remove(jobId);
             jobIdMapping.remove(jobId);
             
@@ -334,8 +341,8 @@ public class AutoMLService {
                 
                 // Also record model creation
                 activityService.recordModelCreated(
-                        job.getModelPath(),
-                        job.getBestAlgorithm() + " - AutoML",
+                        model.getId(),
+                        model.getName(),
                         String.format("%.1f%%", job.getBestScore() * 100),
                         "System",
                         job.getProject() != null ? job.getProject().getId() : null
@@ -984,5 +991,51 @@ public class AutoMLService {
                 .deploymentVersionLabel(deployment != null ? deployment.getVersionLabel() : null)
                 .isActiveDeployment(isActiveDeployment)
                 .build();
+    }
+
+    /**
+     * Create Model entity from completed AutoML job.
+     * This ensures the model can be used for predictions immediately.
+     */
+    private Model createModelFromAutoMLJob(AutoMLJob job) {
+        // Check if model already exists for this job
+        if (job.getBestModel() != null) {
+            return job.getBestModel();
+        }
+
+        Model model = Model.builder()
+                .name(job.getBestAlgorithm() + " - " + (job.getName() != null ? job.getName() : "AutoML"))
+                .algorithm(job.getBestAlgorithm())
+                .algorithmDisplayName(job.getBestAlgorithm())
+                .problemType(job.getProblemType())
+                .project(job.getProject())
+                .datasetId(job.getDataset().getId())
+                .datasetName(job.getDataset().getName())
+                .targetVariable(job.getTargetColumn())
+                .modelPath(job.getModelPath())  // CRITICAL: FastAPI model ID for predictions!
+                .trainingJobId(job.getId())
+                .source("AUTOML")              // Model created via AutoML Engine
+                .sourceJobId(job.getId())      // Link to AutoML job
+                .isDeployed(false)
+                .isProductionReady(true)
+                .isBest(true)
+                .build();
+
+        // Set accuracy/score based on problem type
+        if (job.getProblemType() == ProblemType.REGRESSION) {
+            model.setR2Score(job.getBestScore());
+        } else {
+            model.setAccuracy(job.getBestScore());
+        }
+
+        // Set training time
+        if (job.getElapsedTimeSeconds() != null) {
+            model.setTrainingTimeSeconds(job.getElapsedTimeSeconds());
+        }
+
+        model = modelRepository.save(model);
+        log.info("✅ Created AUTOML Model: {} with modelPath: {}", model.getId(), model.getModelPath());
+        
+        return model;
     }
 }

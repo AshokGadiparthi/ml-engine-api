@@ -11,6 +11,10 @@ import java.time.LocalDateTime;
 /**
  * Model entity - represents a trained ML model.
  * Maps to React UI's Recent Models and Model Evaluation sections.
+ * 
+ * Models can be created from two sources:
+ * - AUTOML: Automatic algorithm selection and hyperparameter tuning
+ * - TRAINING: Manual algorithm selection via Model Training
  */
 @Entity
 @Table(name = "models")
@@ -34,6 +38,20 @@ public class Model {
     @Column(name = "version")
     @Builder.Default
     private String version = "1.0";
+
+    // ========== MODEL SOURCE/CATEGORY ==========
+    /**
+     * Source of the model - how it was created.
+     * AUTOML = Created via AutoML Engine (automatic algorithm selection)
+     * TRAINING = Created via Model Training (manual algorithm selection)
+     * IMPORTED = Imported from external source (future)
+     */
+    @Column(name = "source")
+    @Builder.Default
+    private String source = "TRAINING";  // AUTOML, TRAINING, IMPORTED
+
+    @Column(name = "source_job_id")
+    private String sourceJobId;  // ID of the AutoML job or Training job that created this model
 
     // Algorithm info
     @Column(name = "algorithm", nullable = false)
@@ -119,7 +137,7 @@ public class Model {
     @Column(name = "hyperparameters_json", columnDefinition = "TEXT")
     private String hyperparametersJson;
 
-    // Model files
+    // Model files - CRITICAL: This is the FastAPI model ID for predictions!
     @Column(name = "model_path")
     private String modelPath;
 
@@ -173,4 +191,18 @@ public class Model {
     @UpdateTimestamp
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
+    
+    // ========== HELPER METHODS ==========
+    
+    public boolean isAutoML() {
+        return "AUTOML".equals(source);
+    }
+    
+    public boolean isManualTraining() {
+        return "TRAINING".equals(source);
+    }
+    
+    public boolean isReadyForPredictions() {
+        return modelPath != null && !modelPath.isBlank();
+    }
 }

@@ -420,6 +420,8 @@ public class TrainingService {
                 .targetVariable(job.getTargetVariable())
                 .modelPath(job.getModelPath())  // FastAPI model ID
                 .trainingJobId(job.getId())
+                .source("TRAINING")             // Model created via Model Training
+                .sourceJobId(job.getId())       // Link to Training job
                 .accuracy(accuracy)
                 .precisionScore(precision)
                 .recall(recall)
@@ -427,7 +429,10 @@ public class TrainingService {
                 .isDeployed(false)
                 .build();
         
-        return modelRepository.save(model);
+        Model savedModel = modelRepository.save(model);
+        log.info("✅ Created TRAINING Model: {} with modelPath: {}", savedModel.getId(), savedModel.getModelPath());
+        
+        return savedModel;
     }
 
     private void markJobStopped(String jobId) {
