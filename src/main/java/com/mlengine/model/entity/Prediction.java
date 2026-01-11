@@ -8,6 +8,7 @@ import java.time.LocalDateTime;
 
 /**
  * Prediction entity - stores prediction history.
+ * Supports Single, Batch, and API predictions.
  */
 @Entity
 @Table(name = "predictions")
@@ -27,11 +28,19 @@ public class Prediction {
     @Column(name = "model_name")
     private String modelName;
 
-    // Prediction type
-    @Column(name = "prediction_type")
-    private String predictionType;  // "single" or "batch"
+    @Column(name = "project_id")
+    private String projectId;
 
-    // Input/Output
+    // Prediction type: Single, Batch, API
+    @Column(name = "prediction_type")
+    private String predictionType;
+
+    // Source: UI, API, BATCH
+    @Column(name = "source")
+    @Builder.Default
+    private String source = "UI";
+
+    // Input/Output as JSON
     @Column(name = "input_json", columnDefinition = "TEXT")
     private String inputJson;
 
@@ -42,14 +51,25 @@ public class Prediction {
     @Column(name = "predicted_class")
     private String predictedClass;
 
+    @Column(name = "predicted_label")
+    private String predictedLabel;
+
     @Column(name = "probability")
     private Double probability;
 
     @Column(name = "confidence")
     private Double confidence;
 
+    // Probabilities JSON: {"Approved": 0.87, "Rejected": 0.13}
+    @Column(name = "probabilities_json", columnDefinition = "TEXT")
+    private String probabilitiesJson;
+
     @Column(name = "risk_level")
-    private String riskLevel;  // "High", "Medium", "Low"
+    private String riskLevel;  // "High Risk", "Medium Risk", "Low Risk"
+
+    // For regression
+    @Column(name = "predicted_value")
+    private Double predictedValue;
 
     // Batch specific
     @Column(name = "batch_id")
@@ -58,12 +78,13 @@ public class Prediction {
     @Column(name = "batch_index")
     private Integer batchIndex;
 
+    // API specific
+    @Column(name = "api_key_id")
+    private String apiKeyId;
+
     // Metadata
     @Column(name = "processing_time_ms")
     private Long processingTimeMs;
-
-    @Column(name = "project_id")
-    private String projectId;
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)

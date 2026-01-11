@@ -78,6 +78,9 @@ public class BatchPredictionJob {
     @Column(name = "avg_confidence")
     private Double avgConfidence;
 
+    @Column(name = "result_summary", columnDefinition = "TEXT")
+    private String resultSummary;  // JSON with class counts: {"Approved": 1128, "Rejected": 372}
+
     // Timing
     @Column(name = "started_at")
     private LocalDateTime startedAt;

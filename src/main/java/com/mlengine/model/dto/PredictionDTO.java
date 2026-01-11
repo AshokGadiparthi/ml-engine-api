@@ -10,16 +10,12 @@ import java.util.Map;
 
 /**
  * DTOs for Prediction operations.
- * Matches React UI Predictions screens.
+ * Supports ALL features in the Predictions UI screens.
  */
 public class PredictionDTO {
 
     // ========== SINGLE PREDICTION ==========
 
-    /**
-     * Single prediction request.
-     * Matches React UI Single Prediction form.
-     */
     @Data
     @Builder
     @NoArgsConstructor
@@ -31,14 +27,11 @@ public class PredictionDTO {
         @NotNull(message = "Features are required")
         private Map<String, Object> features;
 
-        private Boolean includeExplanation;  // Include SHAP values
+        private Boolean includeExplanation;
         private String projectId;
+        private String source;  // "UI", "API"
     }
 
-    /**
-     * Single prediction response.
-     * Matches React UI Prediction Result card.
-     */
     @Data
     @Builder
     @NoArgsConstructor
@@ -49,19 +42,22 @@ public class PredictionDTO {
         private String modelName;
 
         // Main prediction
-        private String predictedClass;      // "Positive", "Negative", "Churn", "No Churn"
+        private String predictedClass;      // "Approved", "Rejected"
         private String predictedLabel;      // Display label
         private Double probability;
-        private String probabilityLabel;    // "78.5%"
+        private String probabilityLabel;    // "87.3%"
         private Double confidence;
         private String confidenceLabel;     // "High Confidence"
 
-        // Risk level (for classification)
+        // Probabilities for all classes
+        private Map<String, Double> probabilities;  // {"Approved": 0.873, "Rejected": 0.127}
+
+        // Risk level
         private String riskLevel;           // "High Risk", "Medium Risk", "Low Risk"
         private String riskColor;           // "red", "yellow", "green"
 
         // Regression result
-        private Double predictedValue;      // For regression
+        private Double predictedValue;
         private String predictedValueLabel;
 
         // Input features echo
@@ -74,11 +70,9 @@ public class PredictionDTO {
         // Metadata
         private Long processingTimeMs;
         private LocalDateTime timestamp;
+        private String source;
     }
 
-    /**
-     * Feature contribution for explanation.
-     */
     @Data
     @Builder
     @NoArgsConstructor
@@ -87,16 +81,13 @@ public class PredictionDTO {
         private String feature;
         private Object value;
         private Double contribution;
-        private String contributionLabel;  // "+0.15" or "-0.08"
-        private String direction;          // "positive" or "negative"
+        private String contributionLabel;
+        private String direction;
+        private String impact;
     }
 
     // ========== BATCH PREDICTION ==========
 
-    /**
-     * Batch prediction request.
-     * File is uploaded separately via multipart.
-     */
     @Data
     @Builder
     @NoArgsConstructor
@@ -104,16 +95,13 @@ public class PredictionDTO {
     public static class BatchRequest {
         @NotBlank(message = "Model ID is required")
         private String modelId;
-
         private String jobName;
+        private Boolean includeConfidence;
+        private Boolean includeProbabilities;
         private Boolean includeExplanations;
         private String projectId;
     }
 
-    /**
-     * Batch prediction job response.
-     * Matches React UI Batch Prediction status.
-     */
     @Data
     @Builder
     @NoArgsConstructor
@@ -123,44 +111,27 @@ public class PredictionDTO {
         private String jobName;
         private String modelId;
         private String modelName;
-
-        // Status
-        private String status;          // "QUEUED", "PROCESSING", "COMPLETED", "FAILED"
+        private String status;
         private String statusLabel;
         private String statusMessage;
-
-        // Progress
         private Integer totalRecords;
         private Integer processedRecords;
         private Integer failedRecords;
-        private Integer progress;       // 0-100
-        private String progressLabel;   // "1,234 / 5,000"
-
-        // Files
+        private Integer progress;
+        private String progressLabel;
         private String inputFileName;
         private String outputFileName;
         private String downloadUrl;
-
-        // Results summary (when completed)
         private BatchSummary summary;
-
-        // Timing
         private LocalDateTime startedAt;
         private LocalDateTime completedAt;
         private Long processingTimeMs;
-        private String processingTimeLabel;  // "2 minutes 34 seconds"
-        private String etaLabel;             // "~5 minutes remaining"
-
-        // Error
+        private String processingTimeLabel;
+        private String etaLabel;
         private String errorMessage;
-
-        // Timestamps
         private LocalDateTime createdAt;
     }
 
-    /**
-     * Batch prediction summary.
-     */
     @Data
     @Builder
     @NoArgsConstructor
@@ -169,28 +140,34 @@ public class PredictionDTO {
         private Integer totalPredictions;
         private Integer successfulPredictions;
         private Integer failedPredictions;
-
-        // Classification breakdown
-        private Integer positiveCount;
-        private Integer negativeCount;
-        private Double positivePercentage;
-        private Double negativePercentage;
-
-        // Confidence
+        private Map<String, Integer> classCounts;
+        private Map<String, Double> classPercentages;
         private Double avgConfidence;
         private String avgConfidenceLabel;
         private Double minConfidence;
         private Double maxConfidence;
-
-        // Risk distribution
         private Integer highRiskCount;
         private Integer mediumRiskCount;
         private Integer lowRiskCount;
     }
 
-    /**
-     * Batch job list item.
-     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class BatchValidation {
+        private Boolean valid;
+        private String fileName;
+        private Integer totalRows;
+        private List<String> requiredColumns;
+        private List<String> foundColumns;
+        private List<String> missingColumns;
+        private Integer rowsWithMissingValues;
+        private List<Map<String, Object>> previewRows;
+        private List<String> warnings;
+        private List<String> errors;
+    }
+
     @Data
     @Builder
     @NoArgsConstructor
@@ -205,15 +182,28 @@ public class PredictionDTO {
         private Integer progress;
         private String progressLabel;
         private LocalDateTime createdAt;
-        private String createdAtLabel;  // "2h ago"
+        private String createdAtLabel;
     }
 
     // ========== PREDICTION HISTORY ==========
 
-    /**
-     * Prediction history item.
-     * Matches React UI Prediction History table.
-     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class HistoryFilter {
+        private String projectId;
+        private String modelId;
+        private String type;
+        private String result;
+        private String dateRange;
+        private LocalDateTime startDate;
+        private LocalDateTime endDate;
+        private String search;
+        private Integer page;
+        private Integer pageSize;
+    }
+
     @Data
     @Builder
     @NoArgsConstructor
@@ -222,23 +212,27 @@ public class PredictionDTO {
         private String predictionId;
         private String modelId;
         private String modelName;
-        private String predictionType;  // "single", "batch"
+        private String predictionType;
+        private String predictionTypeLabel;
+        private String source;
         private String predictedClass;
+        private String predictedLabel;
         private Double probability;
         private String probabilityLabel;
+        private Double confidence;
+        private String confidenceLabel;
         private String riskLevel;
         private String riskColor;
-        private LocalDateTime timestamp;
-        private String timestampLabel;  // "2 hours ago"
-
-        // For batch
+        private Map<String, Object> inputFeatures;
+        private Map<String, Double> probabilities;
         private String batchId;
         private Integer batchSize;
+        private String batchResultLabel;
+        private LocalDateTime timestamp;
+        private String timestampLabel;
+        private Long processingTimeMs;
     }
 
-    /**
-     * Prediction history response with pagination.
-     */
     @Data
     @Builder
     @NoArgsConstructor
@@ -249,18 +243,187 @@ public class PredictionDTO {
         private Integer page;
         private Integer pageSize;
         private Integer totalPages;
-
-        // Quick stats
-        private Long totalPredictions;
-        private Long todayPredictions;
-        private Double avgConfidence;
+        private HistoryStats stats;
     }
 
-    // ========== REALTIME PREDICTION ==========
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class HistoryStats {
+        private Long totalPredictions;
+        private String totalLabel;
+        private Map<String, Long> resultCounts;
+        private Map<String, Double> resultPercentages;
+        private Long singleCount;
+        private Long batchCount;
+        private Long apiCount;
+        private Long todayCount;
+        private Long thisWeekCount;
+        private Long thisMonthCount;
+        private Double avgConfidence;
+        private String avgConfidenceLabel;
+    }
 
-    /**
-     * Realtime prediction for API endpoint.
-     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class PredictionDetail {
+        private String predictionId;
+        private String modelId;
+        private String modelName;
+        private String predictionType;
+        private String predictionTypeLabel;
+        private LocalDateTime timestamp;
+        private String timestampLabel;
+        private Map<String, Object> inputFeatures;
+        private List<FeatureDisplay> inputFeaturesDisplay;
+        private String predictedClass;
+        private String predictedLabel;
+        private Double confidence;
+        private String confidenceLabel;
+        private Map<String, Double> probabilities;
+        private String riskLevel;
+        private String riskColor;
+        private List<FeatureContribution> topContributions;
+        private Long processingTimeMs;
+        private String source;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class FeatureDisplay {
+        private String name;
+        private String label;
+        private Object value;
+        private String valueLabel;
+    }
+
+    // ========== API INTEGRATION ==========
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ApiIntegrationInfo {
+        private String modelId;
+        private String modelName;
+        private String endpoint;
+        private String method;
+        private String apiKeyId;
+        private String apiKeyPrefix;
+        private String apiKeyFull;
+        private LocalDateTime apiKeyCreatedAt;
+        private ApiUsageStats usageStats;
+        private RateLimitInfo rateLimit;
+        private Map<String, String> codeExamples;
+        private Map<String, Object> sampleRequest;
+        private Map<String, Object> sampleResponse;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ApiUsageStats {
+        private Long todayRequests;
+        private String todayLabel;
+        private Long monthRequests;
+        private String monthLabel;
+        private Double avgLatencyMs;
+        private String avgLatencyLabel;
+        private Double successRate;
+        private String successRateLabel;
+        private List<DailyUsage> dailyUsage;
+        private List<HourlyUsage> hourlyUsage;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class DailyUsage {
+        private String date;
+        private Long requests;
+        private Double avgLatency;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class HourlyUsage {
+        private Integer hour;
+        private Long requests;
+        private Double avgLatency;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class RateLimitInfo {
+        private Integer limitPerHour;
+        private Integer usedThisHour;
+        private Integer remainingThisHour;
+        private Double usagePercentage;
+        private String usageLabel;
+        private String resetTime;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ApiKeyRequest {
+        private String modelId;
+        private String projectId;
+        private String name;
+        private Integer rateLimitPerHour;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ApiKeyResponse {
+        private String id;
+        private String name;
+        private String keyPrefix;
+        private String keyFull;
+        private String modelId;
+        private String projectId;
+        private Boolean isActive;
+        private Integer rateLimitPerHour;
+        private Long totalRequests;
+        private LocalDateTime lastUsedAt;
+        private LocalDateTime createdAt;
+        private LocalDateTime expiresAt;
+    }
+
+    // ========== MODEL STATS ==========
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ModelPredictionStats {
+        private String modelId;
+        private String modelName;
+        private String algorithm;
+        private Double accuracy;
+        private String accuracyLabel;
+        private LocalDateTime trainedAt;
+        private String trainedAtLabel;
+        private Long totalPredictions;
+        private Map<String, Long> resultCounts;
+    }
+
+    // ========== REALTIME / PUBLIC API ==========
+
     @Data
     @Builder
     @NoArgsConstructor
@@ -275,9 +438,23 @@ public class PredictionDTO {
     @AllArgsConstructor
     public static class RealtimeResponse {
         private String prediction;
-        private Double probability;
         private Double confidence;
-        private Map<String, Double> classProbabilities;
+        private Map<String, Double> probabilities;
         private Long latencyMs;
+    }
+
+    // ========== EXPORT ==========
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ExportRequest {
+        private String projectId;
+        private String modelId;
+        private String type;
+        private LocalDateTime startDate;
+        private LocalDateTime endDate;
+        private String format;
     }
 }
