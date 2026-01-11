@@ -123,6 +123,7 @@ public class TrainingService {
                 .computeResources(request.getGpuAcceleration() ? "4x GPU" : "CPU")
                 .costEstimate(request.getGpuAcceleration() ? 0.42 : 0.05)
                 .project(project)
+                .projectIdValue(project != null ? project.getId() : null)  // Store for async access
                 .build();
 
         job = trainingJobRepository.save(job);
@@ -409,11 +410,22 @@ public class TrainingService {
         Double f1Score = results.get("f1_score") != null ?
                 ((Number) results.get("f1_score")).doubleValue() : null;
         
-        // Fetch project properly to avoid lazy loading issues in async thread
-        Project project = null;
-        if (job.getProjectId() != null) {
-            project = projectRepository.findById(job.getProjectId()).orElse(null);
+        // Get project ID from stored value (avoids lazy loading issues)
+        String projectIdForModel = job.getProjectIdValue();
+        
+        // Fallback: try the read-only column if stored value is null
+        if (projectIdForModel == null) {
+            projectIdForModel = job.getProjectId();
         }
+        
+        // Fetch project properly
+        Project project = null;
+        if (projectIdForModel != null) {
+            project = projectRepository.findById(projectIdForModel).orElse(null);
+        }
+        
+        log.info("Creating TRAINING model for job {} with project: {}, modelPath: {}", 
+                job.getId(), projectIdForModel, job.getModelPath());
         
         Model model = Model.builder()
                 .name(job.getJobName())
@@ -424,7 +436,7 @@ public class TrainingService {
                 .datasetId(job.getDatasetId())
                 .datasetName(job.getDatasetName())
                 .targetVariable(job.getTargetVariable())
-                .modelPath(job.getModelPath())  // FastAPI model ID
+                .modelPath(job.getModelPath())  // FastAPI model ID - CRITICAL!
                 .trainingJobId(job.getId())
                 .source("TRAINING")             // Model created via Model Training
                 .sourceJobId(job.getId())       // Link to Training job
@@ -433,11 +445,13 @@ public class TrainingService {
                 .recall(recall)
                 .f1Score(f1Score)
                 .isDeployed(false)
+                .isProductionReady(true)        // Ready for predictions immediately
+                .isBest(false)                  // Not marked as best (AutoML models are best)
                 .build();
         
         Model savedModel = modelRepository.save(model);
-        log.info("✅ Created TRAINING Model: {} with modelPath: {} for project: {}", 
-                savedModel.getId(), savedModel.getModelPath(), 
+        log.info("✅ Created TRAINING Model: {} (name: {}) with modelPath: {} for project: {}", 
+                savedModel.getId(), savedModel.getName(), savedModel.getModelPath(), 
                 project != null ? project.getId() : "none");
         
         return savedModel;

@@ -156,6 +156,10 @@ public class TrainingJob {
 
     @Column(name = "project_id", insertable = false, updatable = false)
     private String projectId;
+    
+    // Store project ID directly to avoid lazy loading issues in async threads
+    @Column(name = "project_id_value")
+    private String projectIdValue;
 
     // Error handling
     @Column(name = "error_message", columnDefinition = "TEXT")

@@ -47,7 +47,10 @@ public class ModelService {
     
     /**
      * Get all models that are ready for predictions (have modelPath set).
-     * This includes models from all sources (AUTOML, TRAINING).
+     * This includes models from all sources (AUTOML, TRAINING) regardless of deployment status.
+     * 
+     * IMPORTANT: For predictions, any model with a valid modelPath can be used.
+     * Deployment is optional and used for production versioning, not prediction capability.
      */
     public List<ModelDTO.ListItem> getModelsForPredictions(String projectId) {
         List<Model> models;
@@ -62,6 +65,26 @@ public class ModelService {
         
         log.info("Found {} models ready for predictions (projectId: {})", models.size(), projectId);
         
+        // Log details for debugging
+        for (Model m : models) {
+            log.debug("Model for predictions: {} (source: {}, deployed: {}, modelPath: {})", 
+                    m.getName(), m.getSource(), m.getIsDeployed(), m.getModelPath());
+        }
+        
+        return models.stream()
+                .map(this::toListItem)
+                .collect(Collectors.toList());
+    }
+    
+    /**
+     * Get all models regardless of deployment status.
+     * Used for model listing, comparison, and management.
+     */
+    public List<ModelDTO.ListItem> getAllModelsIncludingUndeployed(String projectId) {
+        List<Model> models = projectId != null
+                ? modelRepository.findByProject_IdOrderByCreatedAtDesc(projectId)
+                : modelRepository.findAllByOrderByCreatedAtDesc();
+
         return models.stream()
                 .map(this::toListItem)
                 .collect(Collectors.toList());
