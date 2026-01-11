@@ -33,10 +33,21 @@ public class AutoMLJob {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "project_id")
     private Project project;
+    
+    // Store project ID directly to avoid lazy loading issues in async threads
+    @Column(name = "project_id_value")
+    private String projectIdValue;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "dataset_id")
     private Dataset dataset;
+    
+    // Store dataset info directly to avoid lazy loading issues in async threads
+    @Column(name = "dataset_id_value")
+    private String datasetIdValue;
+    
+    @Column(name = "dataset_name")
+    private String datasetName;
 
     @Column(nullable = false)
     private String targetColumn;

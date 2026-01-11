@@ -409,12 +409,18 @@ public class TrainingService {
         Double f1Score = results.get("f1_score") != null ?
                 ((Number) results.get("f1_score")).doubleValue() : null;
         
+        // Fetch project properly to avoid lazy loading issues in async thread
+        Project project = null;
+        if (job.getProjectId() != null) {
+            project = projectRepository.findById(job.getProjectId()).orElse(null);
+        }
+        
         Model model = Model.builder()
                 .name(job.getJobName())
                 .algorithm(job.getAlgorithm())
                 .algorithmDisplayName(job.getAlgorithmDisplayName())
                 .problemType(job.getProblemType())
-                .project(job.getProject())
+                .project(project)                   // Use fetched project
                 .datasetId(job.getDatasetId())
                 .datasetName(job.getDatasetName())
                 .targetVariable(job.getTargetVariable())
@@ -430,7 +436,9 @@ public class TrainingService {
                 .build();
         
         Model savedModel = modelRepository.save(model);
-        log.info("✅ Created TRAINING Model: {} with modelPath: {}", savedModel.getId(), savedModel.getModelPath());
+        log.info("✅ Created TRAINING Model: {} with modelPath: {} for project: {}", 
+                savedModel.getId(), savedModel.getModelPath(), 
+                project != null ? project.getId() : "none");
         
         return savedModel;
     }

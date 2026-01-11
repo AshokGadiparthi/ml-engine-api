@@ -422,14 +422,20 @@ public class DeploymentService {
      * Create Model entity from AutoML job if not exists.
      */
     private Model createModelFromAutoMLJob(AutoMLJob job) {
+        // Fetch project properly to avoid potential lazy loading issues
+        Project project = null;
+        if (job.getProjectIdValue() != null) {
+            project = projectRepository.findById(job.getProjectIdValue()).orElse(null);
+        }
+        
         Model model = Model.builder()
                 .name(job.getBestAlgorithm() + " - " + job.getName())
                 .algorithm(job.getBestAlgorithm())
                 .algorithmDisplayName(job.getBestAlgorithm())
                 .problemType(job.getProblemType())
-                .project(job.getProject())
-                .datasetId(job.getDataset().getId())
-                .datasetName(job.getDataset().getName())
+                .project(project)
+                .datasetId(job.getDatasetIdValue())    // Use stored value
+                .datasetName(job.getDatasetName())     // Use stored value
                 .targetVariable(job.getTargetColumn())
                 .modelPath(job.getModelPath())  // CRITICAL: FastAPI model ID for predictions!
                 .source("AUTOML")               // Model created via AutoML Engine

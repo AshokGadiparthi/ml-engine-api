@@ -91,6 +91,9 @@ public class AutoMLService {
                 .name(jobName)
                 .description(request.getDescription())
                 .project(project)
+                .projectIdValue(project != null ? project.getId() : null)  // Store for async access
+                .datasetIdValue(dataset.getId())    // Store for async access
+                .datasetName(dataset.getName())     // Store for async access
                 .dataset(dataset)
                 .targetColumn(request.getTargetColumn())
                 .problemType(request.getProblemType())
@@ -1003,14 +1006,20 @@ public class AutoMLService {
             return job.getBestModel();
         }
 
+        // Fetch project properly to avoid lazy loading issues in async thread
+        Project project = null;
+        if (job.getProjectIdValue() != null) {
+            project = projectRepository.findById(job.getProjectIdValue()).orElse(null);
+        }
+
         Model model = Model.builder()
                 .name(job.getBestAlgorithm() + " - " + (job.getName() != null ? job.getName() : "AutoML"))
                 .algorithm(job.getBestAlgorithm())
                 .algorithmDisplayName(job.getBestAlgorithm())
                 .problemType(job.getProblemType())
-                .project(job.getProject())
-                .datasetId(job.getDataset().getId())
-                .datasetName(job.getDataset().getName())
+                .project(project)                     // Use fetched project
+                .datasetId(job.getDatasetIdValue())   // Use stored value - avoids lazy loading!
+                .datasetName(job.getDatasetName())    // Use stored value - avoids lazy loading!
                 .targetVariable(job.getTargetColumn())
                 .modelPath(job.getModelPath())  // CRITICAL: FastAPI model ID for predictions!
                 .trainingJobId(job.getId())
@@ -1034,7 +1043,9 @@ public class AutoMLService {
         }
 
         model = modelRepository.save(model);
-        log.info("✅ Created AUTOML Model: {} with modelPath: {}", model.getId(), model.getModelPath());
+        log.info("✅ Created AUTOML Model: {} with modelPath: {} for project: {}", 
+                model.getId(), model.getModelPath(), 
+                project != null ? project.getId() : "none");
         
         return model;
     }
