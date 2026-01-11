@@ -41,4 +41,19 @@ public interface ModelRepository extends JpaRepository<Model, String> {
     List<Model> findTop5ByProject_IdOrderByCreatedAtDesc(String projectId);
 
     List<Model> findAllByOrderByCreatedAtDesc();
+    
+    // Get all models with modelPath set (ready for predictions)
+    @Query("SELECT m FROM Model m WHERE m.modelPath IS NOT NULL ORDER BY m.createdAt DESC")
+    List<Model> findAllReadyForPredictions();
+    
+    // Get all models for a project OR all models if project is null (for predictions page)
+    @Query("SELECT m FROM Model m WHERE m.modelPath IS NOT NULL AND (m.project.id = :projectId OR :projectId IS NULL) ORDER BY m.createdAt DESC")
+    List<Model> findReadyForPredictionsByProject(@Param("projectId") String projectId);
+    
+    // Get models by source type
+    List<Model> findBySourceOrderByCreatedAtDesc(String source);
+    
+    // Count by source
+    @Query("SELECT COUNT(m) FROM Model m WHERE m.source = :source")
+    Long countBySource(@Param("source") String source);
 }

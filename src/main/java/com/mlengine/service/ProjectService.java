@@ -73,13 +73,35 @@ public class ProjectService {
     }
 
     /**
-     * Get all active projects.
+     * Get all active projects with updated statistics.
      */
     public List<ProjectDTO.ListItem> getAllProjects() {
-        return projectRepository.findByStatusNotOrderByUpdatedAtDesc(ProjectStatus.DELETED)
+        List<Project> projects = projectRepository.findByStatusNotOrderByUpdatedAtDesc(ProjectStatus.DELETED);
+        
+        // Update stats for each project before returning
+        for (Project project : projects) {
+            updateProjectStatsQuick(project);
+        }
+        
+        return projects
                 .stream()
                 .map(this::toListItem)
                 .collect(Collectors.toList());
+    }
+    
+    /**
+     * Quick stats update for list view (counts only).
+     */
+    private void updateProjectStatsQuick(Project project) {
+        String projectId = project.getId();
+        
+        Integer datasetsCount = datasetRepository.countActiveByProjectId(projectId);
+        Integer modelsCount = modelRepository.countByProject(projectId);
+        
+        project.setDatasetsCount(datasetsCount != null ? datasetsCount : 0);
+        project.setModelsCount(modelsCount != null ? modelsCount : 0);
+        
+        projectRepository.save(project);
     }
 
     /**

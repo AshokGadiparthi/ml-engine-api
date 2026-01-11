@@ -35,6 +35,15 @@ public class ModelController {
             @RequestParam(required = false) String projectId) {
         return ResponseEntity.ok(modelService.getAllModels(projectId));
     }
+    
+    @GetMapping("/for-predictions")
+    @Operation(summary = "Get models ready for predictions",
+               description = "Returns models that have a trained model path and can be used for predictions")
+    public ResponseEntity<List<ModelDTO.ListItem>> getModelsForPredictions(
+            @Parameter(description = "Filter by project ID (optional)")
+            @RequestParam(required = false) String projectId) {
+        return ResponseEntity.ok(modelService.getModelsForPredictions(projectId));
+    }
 
     @GetMapping("/{id}")
     @Operation(summary = "Get model by ID",

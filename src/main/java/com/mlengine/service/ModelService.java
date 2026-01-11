@@ -44,6 +44,28 @@ public class ModelService {
                 .map(this::toListItem)
                 .collect(Collectors.toList());
     }
+    
+    /**
+     * Get all models that are ready for predictions (have modelPath set).
+     * This includes models from all sources (AUTOML, TRAINING).
+     */
+    public List<ModelDTO.ListItem> getModelsForPredictions(String projectId) {
+        List<Model> models;
+        
+        if (projectId != null) {
+            // Get models for specific project that are ready for predictions
+            models = modelRepository.findReadyForPredictionsByProject(projectId);
+        } else {
+            // Get ALL models that are ready for predictions
+            models = modelRepository.findAllReadyForPredictions();
+        }
+        
+        log.info("Found {} models ready for predictions (projectId: {})", models.size(), projectId);
+        
+        return models.stream()
+                .map(this::toListItem)
+                .collect(Collectors.toList());
+    }
 
     /**
      * Get model by ID with full details.
