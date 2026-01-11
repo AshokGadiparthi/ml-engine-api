@@ -94,9 +94,11 @@ public class TrainingService {
             }
         }
         
-        if (projectIdToUse != null) {
-            project = projectRepository.findById(projectIdToUse)
-                    .orElseThrow(() -> new IllegalArgumentException("Project not found: " + projectIdToUse));
+        // Use final variable for lambda (Java requirement)
+        final String finalProjectId = projectIdToUse;
+        if (finalProjectId != null) {
+            project = projectRepository.findById(finalProjectId)
+                    .orElseThrow(() -> new IllegalArgumentException("Project not found: " + finalProjectId));
         }
         
         log.info("Final project for training job: {} (id: {})", 
