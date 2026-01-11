@@ -140,6 +140,12 @@ public class TrainingJobDTO {
         // Project
         private String projectId;
 
+        // Deployment Status (for UI to show deploy button state)
+        private Boolean isDeployed;
+        private Boolean isActiveDeployment;
+        private String deploymentId;
+        private String deploymentVersionLabel;  // "v1", "v2", etc.
+
         // Timestamps
         private LocalDateTime createdAt;
         private LocalDateTime updatedAt;
@@ -157,6 +163,7 @@ public class TrainingJobDTO {
         private String jobName;
         private String algorithm;
         private String algorithmDisplayName;
+        private String datasetId;
         private String datasetName;
         private JobStatus status;
         private String statusLabel;
@@ -167,6 +174,18 @@ public class TrainingJobDTO {
         private LocalDateTime startedAt;
         private String startedAtLabel;
         private String etaLabel;
+        private ProblemType problemType;
+        private LocalDateTime createdAt;
+        
+        // Deployment Status (for UI to show deploy button state)
+        private Boolean isDeployed;
+        private Boolean isActiveDeployment;
+        private String deploymentId;
+        private String deploymentVersionLabel;  // "v1", "v2", etc.
+        
+        // Model reference
+        private String modelId;
+        private String projectId;
     }
 
     /**

@@ -5,12 +5,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mlengine.client.MLEngineClient;
 import com.mlengine.model.dto.TrainingJobDTO;
 import com.mlengine.model.entity.Dataset;
+import com.mlengine.model.entity.Deployment;
 import com.mlengine.model.entity.Model;
 import com.mlengine.model.entity.Project;
 import com.mlengine.model.entity.TrainingJob;
 import com.mlengine.model.enums.JobStatus;
 import com.mlengine.model.enums.ProblemType;
 import com.mlengine.repository.DatasetRepository;
+import com.mlengine.repository.DeploymentRepository;
 import com.mlengine.repository.ModelRepository;
 import com.mlengine.repository.ProjectRepository;
 import com.mlengine.repository.TrainingJobRepository;
@@ -46,6 +48,7 @@ public class TrainingService {
     private final DatasetRepository datasetRepository;
     private final ModelRepository modelRepository;
     private final ProjectRepository projectRepository;
+    private final DeploymentRepository deploymentRepository;
     private final AlgorithmService algorithmService;
     private final MLEngineClient mlEngineClient;
     private final ActivityService activityService;
@@ -879,6 +882,36 @@ public class TrainingService {
             }
         }
 
+        // Get deployment status from model
+        Boolean isDeployed = false;
+        Boolean isActiveDeployment = false;
+        String deploymentId = null;
+        String deploymentVersionLabel = null;
+        
+        if (job.getModelId() != null) {
+            Model model = modelRepository.findById(job.getModelId()).orElse(null);
+            if (model != null) {
+                isDeployed = Boolean.TRUE.equals(model.getIsDeployed());
+                // Check if this model has an active deployment
+                if (isDeployed && model.getProject() != null) {
+                    try {
+                        Deployment activeDeployment = deploymentRepository
+                                .findActiveByProjectId(model.getProject().getId())
+                                .orElse(null);
+                        if (activeDeployment != null && 
+                            activeDeployment.getModel() != null &&
+                            activeDeployment.getModel().getId().equals(model.getId())) {
+                            isActiveDeployment = true;
+                            deploymentId = activeDeployment.getId();
+                            deploymentVersionLabel = activeDeployment.getVersionLabel();
+                        }
+                    } catch (Exception e) {
+                        log.debug("Could not check active deployment: {}", e.getMessage());
+                    }
+                }
+            }
+        }
+
         return TrainingJobDTO.Response.builder()
                 .id(job.getId())
                 .jobName(job.getJobName())
@@ -924,17 +957,53 @@ public class TrainingService {
                         String.format("$%.2f", job.getCostEstimate()) : null)
                 .errorMessage(job.getErrorMessage())
                 .projectId(job.getProject() != null ? job.getProject().getId() : null)
+                // Deployment status
+                .isDeployed(isDeployed)
+                .isActiveDeployment(isActiveDeployment)
+                .deploymentId(deploymentId)
+                .deploymentVersionLabel(deploymentVersionLabel)
                 .createdAt(job.getCreatedAt())
                 .updatedAt(job.getUpdatedAt())
                 .build();
     }
 
     private TrainingJobDTO.ListItem toListItem(TrainingJob job) {
+        // Get deployment status from model
+        Boolean isDeployed = false;
+        Boolean isActiveDeployment = false;
+        String deploymentId = null;
+        String deploymentVersionLabel = null;
+        
+        if (job.getModelId() != null) {
+            Model model = modelRepository.findById(job.getModelId()).orElse(null);
+            if (model != null) {
+                isDeployed = Boolean.TRUE.equals(model.getIsDeployed());
+                // Check if this model has an active deployment
+                if (isDeployed && model.getProject() != null) {
+                    try {
+                        Deployment activeDeployment = deploymentRepository
+                                .findActiveByProjectId(model.getProject().getId())
+                                .orElse(null);
+                        if (activeDeployment != null && 
+                            activeDeployment.getModel() != null &&
+                            activeDeployment.getModel().getId().equals(model.getId())) {
+                            isActiveDeployment = true;
+                            deploymentId = activeDeployment.getId();
+                            deploymentVersionLabel = activeDeployment.getVersionLabel();
+                        }
+                    } catch (Exception e) {
+                        log.debug("Could not check active deployment: {}", e.getMessage());
+                    }
+                }
+            }
+        }
+        
         return TrainingJobDTO.ListItem.builder()
                 .id(job.getId())
                 .jobName(job.getJobName())
                 .algorithm(job.getAlgorithm())
                 .algorithmDisplayName(job.getAlgorithmDisplayName())
+                .datasetId(job.getDatasetId())
                 .datasetName(job.getDatasetName())
                 .status(job.getStatus())
                 .statusLabel(formatStatus(job.getStatus()))
@@ -946,6 +1015,15 @@ public class TrainingService {
                 .startedAt(job.getStartedAt())
                 .startedAtLabel(formatDateTime(job.getStartedAt()))
                 .etaLabel(formatEta(job.getEtaSeconds()))
+                .problemType(job.getProblemType())
+                .createdAt(job.getCreatedAt())
+                // Deployment status
+                .isDeployed(isDeployed)
+                .isActiveDeployment(isActiveDeployment)
+                .deploymentId(deploymentId)
+                .deploymentVersionLabel(deploymentVersionLabel)
+                .modelId(job.getModelId())
+                .projectId(job.getProject() != null ? job.getProject().getId() : null)
                 .build();
     }
 
