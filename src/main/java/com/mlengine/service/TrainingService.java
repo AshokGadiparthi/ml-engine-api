@@ -505,10 +505,13 @@ public class TrainingService {
         
         // Record model creation activity (NOT deployment)
         try {
+            String accuracyStr = savedModel.getAccuracy() != null 
+                    ? String.format("%.1f%%", savedModel.getAccuracy() * 100) 
+                    : "N/A";
             activityService.recordModelCreated(
                     savedModel.getId(),
                     savedModel.getName(),
-                    savedModel.getAccuracy(),
+                    accuracyStr,
                     "System",
                     project != null ? project.getId() : null
             );
