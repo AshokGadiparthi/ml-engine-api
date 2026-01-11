@@ -44,6 +44,15 @@ public class ModelController {
             @RequestParam(required = false) String projectId) {
         return ResponseEntity.ok(modelService.getModelsForPredictions(projectId));
     }
+    
+    @GetMapping("/deployed")
+    @Operation(summary = "Get deployed models",
+               description = "Returns only deployed models (isDeployed=true) for predictions page")
+    public ResponseEntity<List<ModelDTO.ListItem>> getDeployedModels(
+            @Parameter(description = "Filter by project ID (optional)")
+            @RequestParam(required = false) String projectId) {
+        return ResponseEntity.ok(modelService.getDeployedModels(projectId));
+    }
 
     @GetMapping("/{id}")
     @Operation(summary = "Get model by ID",

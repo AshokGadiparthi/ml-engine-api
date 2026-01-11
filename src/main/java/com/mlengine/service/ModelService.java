@@ -77,6 +77,27 @@ public class ModelService {
     }
     
     /**
+     * Get only DEPLOYED models for predictions.
+     * This returns models that are explicitly deployed (isDeployed = true).
+     * Used by UI to show deployed models in Predictions page.
+     */
+    public List<ModelDTO.ListItem> getDeployedModels(String projectId) {
+        List<Model> models;
+        
+        if (projectId != null) {
+            models = modelRepository.findByProject_IdAndIsDeployedTrueOrderByDeployedAtDesc(projectId);
+        } else {
+            models = modelRepository.findByIsDeployedTrueOrderByDeployedAtDesc();
+        }
+        
+        log.info("Found {} deployed models (projectId: {})", models.size(), projectId);
+        
+        return models.stream()
+                .map(this::toListItem)
+                .collect(Collectors.toList());
+    }
+    
+    /**
      * Get all models regardless of deployment status.
      * Used for model listing, comparison, and management.
      */
@@ -575,6 +596,10 @@ public class ModelService {
                 .isDeployed(model.getIsDeployed())
                 .isBest(model.getIsBest())
                 .statusLabel(getStatusLabel(model))
+                .source(model.getSource())                    // AUTOML or TRAINING
+                .projectId(model.getProjectId())              // Project ID
+                .modelPath(model.getModelPath())              // FastAPI model ID
+                .deployedAt(model.getDeployedAt())            // When deployed
                 .createdAt(model.getCreatedAt())
                 .createdAtLabel(formatTimeAgo(model.getCreatedAt()))
                 .build();

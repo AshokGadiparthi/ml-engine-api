@@ -207,4 +207,103 @@ public class TrainingJobDTO {
         private Integer epoch;
         private LocalDateTime timestamp;
     }
+
+    // ========== DEPLOYMENT DTOs (Same structure as AutoML) ==========
+
+    /**
+     * Request to deploy a model from training job.
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class DeployRequest {
+        private String deploymentName;  // Optional custom name
+        private String description;
+        private String environment;  // "production", "staging"
+    }
+
+    /**
+     * Response after deploying a training model.
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class DeployResponse {
+        private String deploymentId;
+        private String modelId;
+        private String name;
+        private String algorithm;
+        private String algorithmDisplayName;
+        private Double accuracy;
+        private String accuracyLabel;
+        private String endpointUrl;
+        private String status;
+        private LocalDateTime deployedAt;
+        private String message;
+    }
+
+    /**
+     * Deployment status for a training job.
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class DeploymentStatus {
+        private String jobId;
+        private String modelId;
+        private Boolean isDeployed;
+        private LocalDateTime deployedAt;
+        private String endpointUrl;
+        private Boolean canDeploy;
+    }
+
+    /**
+     * Results from a completed training job.
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ResultsResponse {
+        private String jobId;
+        private String jobName;
+        private JobStatus status;
+        
+        // Algorithm info
+        private String algorithm;
+        private String algorithmDisplayName;
+        private ProblemType problemType;
+        
+        // Metrics
+        private Double accuracy;
+        private String accuracyLabel;
+        private Double precision;
+        private Double recall;
+        private Double f1Score;
+        private Double aucRoc;
+        
+        // Model info
+        private String modelId;
+        private String modelPath;
+        private Boolean isDeployed;
+        private String endpointUrl;
+        
+        // Dataset info
+        private String datasetId;
+        private String datasetName;
+        private String targetVariable;
+        
+        // Training config
+        private Double trainTestSplit;
+        private Integer crossValidationFolds;
+        
+        // Timing
+        private Long trainingDuration;
+        private String trainingDurationLabel;
+        private LocalDateTime startedAt;
+        private LocalDateTime completedAt;
+    }
 }

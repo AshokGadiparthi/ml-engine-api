@@ -120,6 +120,10 @@ public class ModelDTO {
         private Boolean isDeployed;
         private Boolean isBest;
         private String statusLabel;
+        private String source;         // "AUTOML" or "TRAINING"
+        private String projectId;
+        private String modelPath;      // FastAPI model ID for predictions
+        private LocalDateTime deployedAt;
         private LocalDateTime createdAt;
         private String createdAtLabel;  // "2h ago"
     }

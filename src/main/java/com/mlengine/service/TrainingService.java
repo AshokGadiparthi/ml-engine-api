@@ -72,12 +72,36 @@ public class TrainingService {
         Dataset dataset = datasetRepository.findById(request.getDatasetId())
                 .orElseThrow(() -> new IllegalArgumentException("Dataset not found: " + request.getDatasetId()));
 
-        // Validate project
+        // Validate project - TRY MULTIPLE SOURCES
         Project project = null;
-        if (request.getProjectId() != null) {
-            project = projectRepository.findById(request.getProjectId())
-                    .orElseThrow(() -> new IllegalArgumentException("Project not found: " + request.getProjectId()));
+        String projectIdToUse = request.getProjectId();
+        
+        log.info("Training request - projectId from request: {}", projectIdToUse);
+        
+        // FALLBACK 1: If projectId not in request, get from dataset
+        if (projectIdToUse == null && dataset.getProjectId() != null) {
+            projectIdToUse = dataset.getProjectId();
+            log.info("ProjectId not in request, using dataset's projectId: {}", projectIdToUse);
         }
+        
+        // FALLBACK 2: If dataset has project relationship, use that
+        if (projectIdToUse == null && dataset.getProject() != null) {
+            try {
+                projectIdToUse = dataset.getProject().getId();
+                log.info("Got projectId from dataset.project: {}", projectIdToUse);
+            } catch (Exception e) {
+                log.warn("Could not get project from dataset relationship: {}", e.getMessage());
+            }
+        }
+        
+        if (projectIdToUse != null) {
+            project = projectRepository.findById(projectIdToUse)
+                    .orElseThrow(() -> new IllegalArgumentException("Project not found: " + projectIdToUse));
+        }
+        
+        log.info("Final project for training job: {} (id: {})", 
+                project != null ? project.getName() : "null",
+                project != null ? project.getId() : "null");
 
         // Get algorithm display name
         String algorithmDisplayName = algorithmService.getAlgorithmDisplayName(request.getAlgorithm());
@@ -410,12 +434,32 @@ public class TrainingService {
         Double f1Score = results.get("f1_score") != null ?
                 ((Number) results.get("f1_score")).doubleValue() : null;
         
-        // Get project ID from stored value (avoids lazy loading issues)
+        // ========== GET PROJECT ID - TRY MULTIPLE SOURCES ==========
         String projectIdForModel = job.getProjectIdValue();
+        log.info("createModelFromJob - projectIdValue: {}", projectIdForModel);
         
-        // Fallback: try the read-only column if stored value is null
+        // Fallback 1: Try read-only column
         if (projectIdForModel == null) {
             projectIdForModel = job.getProjectId();
+            log.info("createModelFromJob - fallback to projectId column: {}", projectIdForModel);
+        }
+        
+        // Fallback 2: Try to get from dataset
+        if (projectIdForModel == null && job.getDatasetId() != null) {
+            try {
+                Dataset dataset = datasetRepository.findById(job.getDatasetId()).orElse(null);
+                if (dataset != null) {
+                    if (dataset.getProjectId() != null) {
+                        projectIdForModel = dataset.getProjectId();
+                        log.info("createModelFromJob - got projectId from dataset.projectId: {}", projectIdForModel);
+                    } else if (dataset.getProject() != null) {
+                        projectIdForModel = dataset.getProject().getId();
+                        log.info("createModelFromJob - got projectId from dataset.project: {}", projectIdForModel);
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Could not get projectId from dataset: {}", e.getMessage());
+            }
         }
         
         // Fetch project properly
@@ -436,23 +480,38 @@ public class TrainingService {
                 .datasetId(job.getDatasetId())
                 .datasetName(job.getDatasetName())
                 .targetVariable(job.getTargetVariable())
-                .modelPath(job.getModelPath())  // FastAPI model ID - CRITICAL!
+                .modelPath(job.getModelPath())      // FastAPI model ID - CRITICAL for predictions!
                 .trainingJobId(job.getId())
-                .source("TRAINING")             // Model created via Model Training
-                .sourceJobId(job.getId())       // Link to Training job
+                .source("TRAINING")                 // Model created via Model Training
+                .sourceJobId(job.getId())           // Link to Training job
                 .accuracy(accuracy)
                 .precisionScore(precision)
                 .recall(recall)
                 .f1Score(f1Score)
-                .isDeployed(false)
-                .isProductionReady(true)        // Ready for predictions immediately
-                .isBest(false)                  // Not marked as best (AutoML models are best)
+                // ========== AUTO-DEPLOY LIKE AUTOML ==========
+                .isDeployed(true)                   // AUTO-DEPLOY: Same as AutoML!
+                .isProductionReady(true)            // Ready for predictions
+                .isBest(false)                      // Can be set later via API
+                .deployedAt(LocalDateTime.now())    // Set deployment timestamp
+                .endpointUrl("/api/predictions/realtime/" + job.getModelPath())  // Set endpoint
                 .build();
         
         Model savedModel = modelRepository.save(model);
-        log.info("✅ Created TRAINING Model: {} (name: {}) with modelPath: {} for project: {}", 
+        log.info("✅ Created & Auto-Deployed TRAINING Model: {} (name: {}) with modelPath: {} for project: {}", 
                 savedModel.getId(), savedModel.getName(), savedModel.getModelPath(), 
                 project != null ? project.getId() : "none");
+        
+        // Record deployment activity (same as AutoML)
+        try {
+            activityService.recordModelDeployed(
+                    savedModel.getId(),
+                    savedModel.getName(),
+                    "System",
+                    project != null ? project.getId() : null
+            );
+        } catch (Exception e) {
+            log.warn("Failed to record deployment activity: {}", e.getMessage());
+        }
         
         return savedModel;
     }
@@ -609,6 +668,194 @@ public class TrainingService {
 
         trainingJobRepository.delete(job);
         log.info("Deleted training job: {}", jobId);
+    }
+
+    // ========== DEPLOYMENT METHODS (Same as AutoML) ==========
+
+    /**
+     * Deploy a model from a completed training job.
+     * Works exactly like AutoML's deployBestModel.
+     */
+    @Transactional
+    public TrainingJobDTO.DeployResponse deployModel(String jobId, TrainingJobDTO.DeployRequest request) {
+        TrainingJob job = trainingJobRepository.findById(jobId)
+                .orElseThrow(() -> new IllegalArgumentException("Training job not found: " + jobId));
+
+        if (job.getStatus() != JobStatus.COMPLETED) {
+            throw new IllegalStateException("Can only deploy models from completed training jobs");
+        }
+
+        // Get or create model
+        Model model = null;
+        if (job.getModelId() != null) {
+            model = modelRepository.findById(job.getModelId()).orElse(null);
+        }
+
+        if (model == null) {
+            // Create new model if doesn't exist
+            model = createModelFromJobForDeployment(job, request);
+        } else {
+            // Update existing model to deployed status
+            model.setIsDeployed(true);
+            model.setDeployedAt(LocalDateTime.now());
+            model.setEndpointUrl("/api/predictions/realtime/" + model.getModelPath());
+            if (request != null && request.getDeploymentName() != null) {
+                model.setName(request.getDeploymentName());
+            }
+            model = modelRepository.save(model);
+        }
+
+        // Update job with model reference
+        job.setModelId(model.getId());
+        trainingJobRepository.save(job);
+
+        // Record deployment activity
+        try {
+            String projectId = job.getProjectIdValue() != null ? job.getProjectIdValue() : job.getProjectId();
+            activityService.recordModelDeployed(
+                    model.getId(),
+                    model.getName(),
+                    "System",
+                    projectId
+            );
+        } catch (Exception e) {
+            log.warn("Failed to record deployment activity: {}", e.getMessage());
+        }
+
+        log.info("✅ Deployed TRAINING model: {} from job: {}", model.getId(), jobId);
+
+        return TrainingJobDTO.DeployResponse.builder()
+                .deploymentId(model.getId())
+                .modelId(model.getId())
+                .name(model.getName())
+                .algorithm(model.getAlgorithm())
+                .algorithmDisplayName(model.getAlgorithmDisplayName())
+                .accuracy(model.getAccuracy())
+                .accuracyLabel(model.getAccuracy() != null ? String.format("%.1f%%", model.getAccuracy() * 100) : "N/A")
+                .endpointUrl(model.getEndpointUrl())
+                .status("DEPLOYED")
+                .deployedAt(model.getDeployedAt())
+                .message("Model deployed successfully")
+                .build();
+    }
+
+    /**
+     * Create model for deployment (used when model doesn't exist yet).
+     */
+    private Model createModelFromJobForDeployment(TrainingJob job, TrainingJobDTO.DeployRequest request) {
+        // Get project
+        String projectIdForModel = job.getProjectIdValue();
+        if (projectIdForModel == null) {
+            projectIdForModel = job.getProjectId();
+        }
+        if (projectIdForModel == null && job.getDatasetId() != null) {
+            Dataset dataset = datasetRepository.findById(job.getDatasetId()).orElse(null);
+            if (dataset != null) {
+                projectIdForModel = dataset.getProjectId();
+            }
+        }
+        
+        Project project = null;
+        if (projectIdForModel != null) {
+            project = projectRepository.findById(projectIdForModel).orElse(null);
+        }
+
+        String modelName = (request != null && request.getDeploymentName() != null) 
+                ? request.getDeploymentName() 
+                : job.getJobName();
+
+        Model model = Model.builder()
+                .name(modelName)
+                .algorithm(job.getAlgorithm())
+                .algorithmDisplayName(job.getAlgorithmDisplayName())
+                .problemType(job.getProblemType())
+                .project(project)
+                .datasetId(job.getDatasetId())
+                .datasetName(job.getDatasetName())
+                .targetVariable(job.getTargetVariable())
+                .modelPath(job.getModelPath())
+                .trainingJobId(job.getId())
+                .source("TRAINING")
+                .sourceJobId(job.getId())
+                .accuracy(job.getBestAccuracy() != null ? job.getBestAccuracy() : job.getCurrentAccuracy())
+                .isDeployed(true)
+                .isProductionReady(true)
+                .isBest(false)
+                .deployedAt(LocalDateTime.now())
+                .endpointUrl("/api/predictions/realtime/" + job.getModelPath())
+                .build();
+
+        return modelRepository.save(model);
+    }
+
+    /**
+     * Get deployment status for a training job.
+     */
+    public TrainingJobDTO.DeploymentStatus getDeploymentStatus(String jobId) {
+        TrainingJob job = trainingJobRepository.findById(jobId)
+                .orElseThrow(() -> new IllegalArgumentException("Training job not found: " + jobId));
+
+        Model model = null;
+        if (job.getModelId() != null) {
+            model = modelRepository.findById(job.getModelId()).orElse(null);
+        }
+
+        boolean isDeployed = model != null && Boolean.TRUE.equals(model.getIsDeployed());
+
+        return TrainingJobDTO.DeploymentStatus.builder()
+                .jobId(jobId)
+                .modelId(model != null ? model.getId() : null)
+                .isDeployed(isDeployed)
+                .deployedAt(model != null ? model.getDeployedAt() : null)
+                .endpointUrl(model != null ? model.getEndpointUrl() : null)
+                .canDeploy(job.getStatus() == JobStatus.COMPLETED && job.getModelPath() != null)
+                .build();
+    }
+
+    /**
+     * Get results from a completed training job (like AutoML results).
+     */
+    public TrainingJobDTO.ResultsResponse getResults(String jobId) {
+        TrainingJob job = trainingJobRepository.findById(jobId)
+                .orElseThrow(() -> new IllegalArgumentException("Training job not found: " + jobId));
+
+        if (job.getStatus() != JobStatus.COMPLETED) {
+            throw new IllegalStateException("Results only available for completed jobs");
+        }
+
+        Model model = null;
+        if (job.getModelId() != null) {
+            model = modelRepository.findById(job.getModelId()).orElse(null);
+        }
+
+        return TrainingJobDTO.ResultsResponse.builder()
+                .jobId(jobId)
+                .jobName(job.getJobName())
+                .status(job.getStatus())
+                .algorithm(job.getAlgorithm())
+                .algorithmDisplayName(job.getAlgorithmDisplayName())
+                .problemType(job.getProblemType())
+                .accuracy(job.getBestAccuracy() != null ? job.getBestAccuracy() : job.getCurrentAccuracy())
+                .accuracyLabel(formatAccuracy(job.getBestAccuracy() != null ? job.getBestAccuracy() : job.getCurrentAccuracy()))
+                .modelId(model != null ? model.getId() : null)
+                .modelPath(job.getModelPath())
+                .isDeployed(model != null && Boolean.TRUE.equals(model.getIsDeployed()))
+                .endpointUrl(model != null ? model.getEndpointUrl() : null)
+                .datasetId(job.getDatasetId())
+                .datasetName(job.getDatasetName())
+                .targetVariable(job.getTargetVariable())
+                .trainTestSplit(job.getTrainTestSplit())
+                .crossValidationFolds(job.getCrossValidationFolds())
+                .trainingDuration(job.getDurationSeconds())
+                .trainingDurationLabel(formatDuration(job.getDurationSeconds()))
+                .startedAt(job.getStartedAt())
+                .completedAt(job.getCompletedAt())
+                .build();
+    }
+
+    private String formatAccuracy(Double accuracy) {
+        if (accuracy == null) return "N/A";
+        return String.format("%.1f%%", accuracy * 100);
     }
 
     // ========== DTO CONVERTERS ==========

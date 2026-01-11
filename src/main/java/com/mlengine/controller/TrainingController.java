@@ -86,4 +86,29 @@ public class TrainingController {
         trainingService.deleteJob(id);
         return ResponseEntity.noContent().build();
     }
+
+    // ========== DEPLOYMENT ENDPOINTS (Same as AutoML) ==========
+
+    @PostMapping("/jobs/{id}/deploy")
+    @Operation(summary = "Deploy model from training job",
+               description = "Deploys the trained model, making it available for predictions. Works exactly like AutoML deploy.")
+    public ResponseEntity<TrainingJobDTO.DeployResponse> deployModel(
+            @PathVariable String id,
+            @RequestBody(required = false) TrainingJobDTO.DeployRequest request) {
+        return ResponseEntity.ok(trainingService.deployModel(id, request));
+    }
+
+    @GetMapping("/jobs/{id}/results")
+    @Operation(summary = "Get training results",
+               description = "Returns results from a completed training job including metrics and model info")
+    public ResponseEntity<TrainingJobDTO.ResultsResponse> getResults(@PathVariable String id) {
+        return ResponseEntity.ok(trainingService.getResults(id));
+    }
+
+    @GetMapping("/jobs/{id}/deployment-status")
+    @Operation(summary = "Get deployment status",
+               description = "Returns current deployment status of the model from this training job")
+    public ResponseEntity<TrainingJobDTO.DeploymentStatus> getDeploymentStatus(@PathVariable String id) {
+        return ResponseEntity.ok(trainingService.getDeploymentStatus(id));
+    }
 }
