@@ -194,6 +194,11 @@ public class EDAController {
             @PathVariable String datasetId
     ) {
         EDADTO.SummaryResponse response = edaService.getLatestAnalysis(datasetId);
+        
+        if (response == null) {
+            return ResponseEntity.notFound().build();
+        }
+        
         return ResponseEntity.ok(response);
     }
     

@@ -390,12 +390,12 @@ public class EDAService {
     
     /**
      * Get latest EDA analysis for dataset
+     * Returns null if no analysis found
      */
     public EDADTO.SummaryResponse getLatestAnalysis(String datasetId) {
-        EDAAnalysis analysis = edaRepository.findLatestByDatasetId(datasetId)
-                .orElseThrow(() -> new RuntimeException("No EDA analysis found for dataset: " + datasetId));
-        
-        return getSummary(analysis.getEdaId());
+        return edaRepository.findLatestByDatasetId(datasetId)
+                .map(analysis -> getSummary(analysis.getEdaId()))
+                .orElse(null);
     }
     
     /**
