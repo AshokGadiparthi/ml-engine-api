@@ -441,6 +441,9 @@ public class EDAService {
                             .map(EDADTO.Insight::getTitle)
                             .orElse("Data quality varies");
             
+            // Calculate missing percentage
+            double missingPct = (qualityMetrics.getMissingValues() * 100.0) / Math.max(qualityMetrics.getRowCount(), 1);
+            
             EDAAnalysis entity = EDAAnalysis.builder()
                     .edaId(edaId)
                     .datasetId(request.getDatasetId())
@@ -455,7 +458,7 @@ public class EDAService {
                     .columnCount(qualityMetrics.getColumnCount())
                     .missingValues(qualityMetrics.getMissingValues())
                     .duplicateRows(qualityMetrics.getDuplicateRows())
-                    .missingPercentage((qualityMetrics.getMissingValues() * 100.0) / Math.max(qualityMetrics.getRowCount(), 1))
+                    .missingPercentage(missingPct)
                     .numericFeatures(featuresAnalysis.getNumericFeatures())
                     .categoricalFeatures(featuresAnalysis.getCategoricalFeatures())
                     .dateTimeFeatures(featuresAnalysis.getDateTimeFeatures())
