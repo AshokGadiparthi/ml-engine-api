@@ -184,14 +184,17 @@ public class EDAService {
                                                   EDADTO.FeaturesAnalysis features) {
         List<EDADTO.Insight> insights = new ArrayList<>();
         
+        // Calculate missing percentage
+        double missingPct = (quality.getMissingValues() * 100.0) / Math.max(quality.getRowCount(), 1);
+        
         // Missing data insights
-        if (quality.getMissingPercentage() > 0.2) {
+        if (missingPct > 0.2) {
             insights.add(EDADTO.Insight.builder()
                     .id("insight_missing_" + UUID.randomUUID())
                     .title("High Missing Data Detected")
-                    .description(String.format("%.1f%% of data is missing", quality.getMissingPercentage()))
+                    .description(String.format("%.1f%% of data is missing", missingPct))
                     .type("missing_data")
-                    .severity(quality.getMissingPercentage() > 0.5 ? "CRITICAL" : "HIGH")
+                    .severity(missingPct > 0.5 ? "CRITICAL" : "HIGH")
                     .recommendation("Consider imputation strategies or removing columns with excessive missing values")
                     .build());
         }
