@@ -450,6 +450,7 @@ public class EDAService {
             EDAAnalysis entity = EDAAnalysis.builder()
                     .edaId(edaId)
                     .datasetId(request.getDatasetId())
+                    .datasetName(request.getDatasetId()) // Use datasetId as name if not provided
                     .projectId(request.getProjectId() != null ? request.getProjectId() : "default")
                     .overallQualityScore(qualityMetrics.getOverallScore())
                     .qualityAssessment(qualityMetrics.getAssessment())
