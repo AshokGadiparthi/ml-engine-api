@@ -17,7 +17,7 @@ import java.util.Map;
 @Entity
 @Table(name = "eda_analyses", indexes = {
     @Index(name = "idx_dataset_id", columnList = "dataset_id"),
-    @Index(name = "idx_quality_score", columnList = "quality_score"),
+    @Index(name = "idx_overall_quality_score", columnList = "overall_quality_score"),
     @Index(name = "idx_created_at", columnList = "created_at")
 })
 @Data
