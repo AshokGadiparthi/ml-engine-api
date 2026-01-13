@@ -176,33 +176,53 @@ public class FastAPIEDAClient {
     
     /**
      * Retrieve cached analysis results
+     * Gracefully handles 404 errors from FastAPI
      */
     public Map<String, Object> getAnalysisResults(String edaId) {
         try {
             log.info("Retrieving cached results for EDA ID: {}", edaId);
             String url = fastApiBaseUrl + "/eda/results/" + edaId;
             
-            Map<String, Object> result = restTemplate.getForObject(url, Map.class);
-            return result != null ? result : new HashMap<>();
+            try {
+                Map<String, Object> result = restTemplate.getForObject(url, Map.class);
+                return result != null ? result : new HashMap<>();
+            } catch (RestClientException e) {
+                if (e.getMessage() != null && e.getMessage().contains("404")) {
+                    log.warn("Analysis results not found on FastAPI (404). Returning empty cache for: {}", edaId);
+                    return new HashMap<>();
+                }
+                throw e;
+            }
         } catch (Exception e) {
-            log.error("Error retrieving analysis results: {}", e.getMessage());
-            throw new RuntimeException("Failed to retrieve analysis results", e);
+            log.warn("Error retrieving analysis results (using fallback): {}", e.getMessage());
+            // Return empty map as fallback instead of throwing exception
+            return new HashMap<>();
         }
     }
     
     /**
      * Retrieve specific analysis type from cached results
+     * Gracefully handles 404 errors from FastAPI
      */
     public Map<String, Object> getAnalysisResultsByType(String edaId, String type) {
         try {
             log.info("Retrieving {} results for EDA ID: {}", type, edaId);
             String url = fastApiBaseUrl + "/eda/results/" + edaId + "/" + type;
             
-            Map<String, Object> result = restTemplate.getForObject(url, Map.class);
-            return result != null ? result : new HashMap<>();
+            try {
+                Map<String, Object> result = restTemplate.getForObject(url, Map.class);
+                return result != null ? result : new HashMap<>();
+            } catch (RestClientException e) {
+                if (e.getMessage() != null && e.getMessage().contains("404")) {
+                    log.warn("Analysis type '{}' not found on FastAPI (404). Returning empty result for: {}", type, edaId);
+                    return new HashMap<>();
+                }
+                throw e;
+            }
         } catch (Exception e) {
-            log.error("Error retrieving {} results: {}", type, e.getMessage());
-            throw new RuntimeException("Failed to retrieve analysis results", e);
+            log.warn("Error retrieving {} results (using fallback): {}", type, e.getMessage());
+            // Return empty map as fallback instead of throwing exception
+            return new HashMap<>();
         }
     }
 }
