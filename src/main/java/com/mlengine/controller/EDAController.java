@@ -143,10 +143,31 @@ public class EDAController {
             @Parameter(description = "EDA analysis ID")
             @PathVariable String edaId
     ) {
-        EDADTO.FeaturesResponse response = EDADTO.FeaturesResponse.builder()
-                .edaId(edaId)
-                .build();
-        return ResponseEntity.ok(response);
+        try {
+            EDAAnalysis analysis = edaRepository.findByEdaId(edaId)
+                    .orElseThrow(() -> new RuntimeException("EDA analysis not found: " + edaId));
+            
+            // Deserialize features analysis from JSON
+            EDADTO.FeaturesAnalysis featuresAnalysis = objectMapper.readValue(
+                    analysis.getFeaturesAnalysisJson(),
+                    EDADTO.FeaturesAnalysis.class
+            );
+            
+            EDADTO.FeaturesResponse response = EDADTO.FeaturesResponse.builder()
+                    .edaId(edaId)
+                    .numericFeatures(featuresAnalysis.getNumericFeatures())
+                    .categoricalFeatures(featuresAnalysis.getCategoricalFeatures())
+                    .dateTimeFeatures(featuresAnalysis.getDateTimeFeatures())
+                    .totalFeatures(featuresAnalysis.getTotalFeatures())
+                    .statistics(featuresAnalysis.getStatistics())
+                    .correlations(featuresAnalysis.getCorrelations())
+                    .build();
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error retrieving feature analysis: {}", e.getMessage(), e);
+            throw new RuntimeException("Error retrieving features: " + e.getMessage());
+        }
     }
     
     /**
