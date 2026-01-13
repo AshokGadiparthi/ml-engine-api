@@ -502,6 +502,10 @@ public class EDAService {
             // Calculate missing percentage
             double missingPct = (qualityMetrics.getMissingValues() * 100.0) / Math.max(qualityMetrics.getRowCount(), 1);
             
+            String featuresJson = objectMapper.writeValueAsString(featuresAnalysis);
+            log.info("Saving featuresAnalysisJson: {} bytes", featuresJson.length());
+            log.debug("FeaturesAnalysis JSON content: {}", featuresJson);
+            
             EDAAnalysis entity = EDAAnalysis.builder()
                     .edaId(edaId)
                     .datasetId(request.getDatasetId())
@@ -533,7 +537,7 @@ public class EDAService {
                     .sampleRows(request.getSampleRows())
                     .analysisTimeMs(analysisTimeMs)
                     .qualityMetricsJson(objectMapper.writeValueAsString(qualityMetrics))
-                    .featuresAnalysisJson(objectMapper.writeValueAsString(featuresAnalysis))
+                    .featuresAnalysisJson(featuresJson)
                     .insightsJson(objectMapper.writeValueAsString(insights))
                     .build();
             
@@ -601,18 +605,28 @@ public class EDAService {
             EDAAnalysis analysis = edaRepository.findByEdaId(edaId)
                     .orElseThrow(() -> new RuntimeException("EDA analysis not found: " + edaId));
             
+            log.info("Retrieved EDAAnalysis from database: {}", edaId);
+            log.info("FeaturesAnalysisJson from DB: {} bytes", 
+                    analysis.getFeaturesAnalysisJson() != null ? analysis.getFeaturesAnalysisJson().length() : 0);
+            log.debug("FeaturesAnalysisJson content: {}", analysis.getFeaturesAnalysisJson());
+            
             // Deserialize features analysis from JSON
             EDADTO.FeaturesAnalysis featuresAnalysis = objectMapper.readValue(
                     analysis.getFeaturesAnalysisJson(),
                     EDADTO.FeaturesAnalysis.class
             );
             
+            log.info("Deserialized FeaturesAnalysis: totalFeatures={}, statistics count={}, correlations count={}", 
+                    featuresAnalysis.getTotalFeatures(),
+                    featuresAnalysis.getStatistics() != null ? featuresAnalysis.getStatistics().size() : 0,
+                    featuresAnalysis.getCorrelations() != null ? featuresAnalysis.getCorrelations().size() : 0);
+            
             return EDADTO.FeaturesResponse.builder()
                     .edaId(edaId)
                     .analysis(featuresAnalysis)
                     .build();
         } catch (Exception e) {
-            log.error("Error retrieving features for EDA {}: {}", edaId, e.getMessage());
+            log.error("Error retrieving features for EDA {}: {}", edaId, e.getMessage(), e);
             return null;
         }
     }
