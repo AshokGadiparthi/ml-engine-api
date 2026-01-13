@@ -554,12 +554,7 @@ public class EDAService {
             
             return EDADTO.FeaturesResponse.builder()
                     .edaId(edaId)
-                    .numericFeatures(featuresAnalysis.getNumericFeatures())
-                    .categoricalFeatures(featuresAnalysis.getCategoricalFeatures())
-                    .dateTimeFeatures(featuresAnalysis.getDateTimeFeatures())
-                    .totalFeatures(featuresAnalysis.getTotalFeatures())
-                    .statistics(featuresAnalysis.getStatistics())
-                    .correlations(featuresAnalysis.getCorrelations())
+                    .analysis(featuresAnalysis)
                     .build();
         } catch (Exception e) {
             log.error("Error retrieving features for EDA {}: {}", edaId, e.getMessage());
