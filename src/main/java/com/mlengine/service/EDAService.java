@@ -538,6 +538,35 @@ public class EDAService {
         return "POOR";
     }
     
+    /**
+     * Get feature analysis for an EDA analysis
+     */
+    public EDADTO.FeaturesResponse getFeatures(String edaId) {
+        try {
+            EDAAnalysis analysis = edaRepository.findByEdaId(edaId)
+                    .orElseThrow(() -> new RuntimeException("EDA analysis not found: " + edaId));
+            
+            // Deserialize features analysis from JSON
+            EDADTO.FeaturesAnalysis featuresAnalysis = objectMapper.readValue(
+                    analysis.getFeaturesAnalysisJson(),
+                    EDADTO.FeaturesAnalysis.class
+            );
+            
+            return EDADTO.FeaturesResponse.builder()
+                    .edaId(edaId)
+                    .numericFeatures(featuresAnalysis.getNumericFeatures())
+                    .categoricalFeatures(featuresAnalysis.getCategoricalFeatures())
+                    .dateTimeFeatures(featuresAnalysis.getDateTimeFeatures())
+                    .totalFeatures(featuresAnalysis.getTotalFeatures())
+                    .statistics(featuresAnalysis.getStatistics())
+                    .correlations(featuresAnalysis.getCorrelations())
+                    .build();
+        } catch (Exception e) {
+            log.error("Error retrieving features for EDA {}: {}", edaId, e.getMessage());
+            return null;
+        }
+    }
+    
     private Map<String, Object> parseDatasetMetadata(Dataset dataset) {
         // This is a placeholder - implement based on your Dataset structure
         Map<String, Object> metadata = new HashMap<>();
