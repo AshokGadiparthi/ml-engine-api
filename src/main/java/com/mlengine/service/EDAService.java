@@ -124,10 +124,19 @@ public class EDAService {
      * Analyze features in the dataset
      */
     private EDADTO.FeaturesAnalysis analyzeFeatures(Dataset dataset, EDADTO.AnalysisRequest request) {
+        log.info("Starting analyzeFeatures for dataset: {}", dataset.getId());
+        
         Map<String, Object> dataMetadata = parseDatasetMetadata(dataset);
         
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> columns = (List<Map<String, Object>>) dataMetadata.getOrDefault("columns", new ArrayList<>());
+        
+        log.info("analyzeFeatures received {} columns from parseDatasetMetadata", columns.size());
+        
+        if (columns.isEmpty()) {
+            log.warn("No columns found! Dataset columnsJson: {}", dataset.getColumnsJson());
+            log.warn("Dataset columnCount: {}", dataset.getColumnCount());
+        }
         
         List<EDADTO.FeatureStats> statistics = new ArrayList<>();
         int numericCount = 0;
@@ -141,6 +150,9 @@ public class EDAService {
             String name = (String) column.get("name");
             double missingPct = toDouble(column.get("missingPct"));
             long uniqueValues = toLong(column.get("uniqueValues"));
+            
+            log.debug("Processing column: {} (type: {}, unique: {}, missing: {}%)", 
+                    name, dataType, uniqueValues, missingPct);
             
             EDADTO.FeatureStats stats = EDADTO.FeatureStats.builder()
                     .name(name)
@@ -158,19 +170,22 @@ public class EDAService {
                 stats.setMin(toDouble(column.get("min")));
                 stats.setMedian(toDouble(column.get("median")));
                 stats.setMax(toDouble(column.get("max")));
+                log.debug("Added numeric feature: {} (mean: {}, min: {}, max: {})", 
+                        name, stats.getMean(), stats.getMin(), stats.getMax());
             } else if (dataType != null && dataType.toLowerCase().contains("categorical")) {
                 categoricalCount++;
                 stats.setMode((String) column.get("mode"));
                 stats.setModeFrequency(toLong(column.get("modeFrequency")));
+                log.debug("Added categorical feature: {} (unique: {})", name, uniqueValues);
             } else if (dataType != null && dataType.toLowerCase().contains("datetime")) {
                 dateTimeCount++;
+                log.debug("Added datetime feature: {}", name);
             }
             
             statistics.add(stats);
-            log.debug("Added feature stat: {} (type: {}, unique: {})", name, dataType, uniqueValues);
         }
         
-        log.info("Analyzed {} features: {} numeric, {} categorical, {} datetime", 
+        log.info("analyzeFeatures completed: {} total features ({} numeric, {} categorical, {} datetime)", 
                 columns.size(), numericCount, categoricalCount, dateTimeCount);
         
         // Calculate correlations
@@ -609,52 +624,45 @@ public class EDAService {
         metadata.put("missingValues", 0L);
         metadata.put("duplicateRows", 0L);
         
-        // Try to parse columns from existing columnsJson
         List<Map<String, Object>> columns = new ArrayList<>();
-        if (dataset.getColumnsJson() != null && !dataset.getColumnsJson().isEmpty()) {
-            try {
-                columns = objectMapper.readValue(
-                        dataset.getColumnsJson(),
-                        new com.fasterxml.jackson.core.type.TypeReference<List<Map<String, Object>>>() {}
-                );
-                log.info("Successfully parsed {} columns from dataset metadata", columns.size());
-            } catch (Exception e) {
-                log.error("Error parsing columns JSON from dataset: {}", e.getMessage());
-                columns = new ArrayList<>();
-            }
+        
+        // Check if columnsJson exists
+        if (dataset.getColumnsJson() == null || dataset.getColumnsJson().isEmpty()) {
+            log.warn("Dataset {} has no columnsJson", dataset.getId());
+            metadata.put("columns", columns);
+            return metadata;
         }
         
-        // If no columns found, try to read from data source
-        if (columns.isEmpty()) {
-            log.warn("Dataset {} has no column metadata. Attempting to read from data source...", dataset.getId());
+        try {
+            log.info("Parsing columnsJson for dataset {}: {} bytes", 
+                    dataset.getId(), dataset.getColumnsJson().length());
             
-            // Try to read from CSV file
-            if (dataset.getFilePath() != null && !dataset.getFilePath().isEmpty()) {
-                try {
-                    columns = extractColumnsFromCSV(dataset.getFilePath());
-                    if (!columns.isEmpty()) {
-                        log.info("Successfully extracted {} columns from CSV file", columns.size());
-                        // Persist this back to the dataset
-                        dataset.setColumnsJson(objectMapper.writeValueAsString(columns));
-                        dataset.setColumnCount(columns.size());
-                        datasetRepository.save(dataset);
-                    }
-                } catch (Exception e) {
-                    log.error("Error reading columns from CSV file {}: {}", dataset.getFilePath(), e.getMessage());
-                }
+            // Parse the JSON array directly
+            columns = objectMapper.readValue(
+                    dataset.getColumnsJson(),
+                    new com.fasterxml.jackson.core.type.TypeReference<List<Map<String, Object>>>() {}
+            );
+            
+            log.info("Successfully parsed {} columns from columnsJson", columns.size());
+            
+            // Log each column for debugging
+            for (Map<String, Object> col : columns) {
+                log.debug("Column: name={}, dataType={}, uniqueValues={}, missingPct={}", 
+                        col.get("name"), 
+                        col.get("dataType"),
+                        col.get("uniqueValues"),
+                        col.get("missingPct"));
             }
             
-            // If still no columns, throw error with helpful message
-            if (columns.isEmpty()) {
-                String errorMsg = String.format(
-                    "Dataset '%s' has no column metadata. Please ensure the dataset has been properly uploaded and processed. " +
-                    "Column information should be in: filePath=%s, columnsJson=%s, columnCount=%d",
-                    dataset.getName(), dataset.getFilePath(), dataset.getColumnsJson(), 
-                    dataset.getColumnCount() != null ? dataset.getColumnCount() : 0
-                );
-                log.error(errorMsg);
-                throw new RuntimeException(errorMsg);
-            }
+        } catch (com.fasterxml.jackson.core.JsonParseException e) {
+            log.error("JSON parse error in columnsJson: {}", e.getMessage());
+            log.error("ColumnsJson content: {}", dataset.getColumnsJson());
+        } catch (com.fasterxml.jackson.databind.JsonMappingException e) {
+            log.error("JSON mapping error in columnsJson: {}", e.getMessage());
+            log.error("ColumnsJson content: {}", dataset.getColumnsJson());
+        } catch (Exception e) {
+            log.error("Error parsing columnsJson: {}", e.getMessage(), e);
+            log.error("ColumnsJson content: {}", dataset.getColumnsJson());
         }
         
         metadata.put("columns", columns);
