@@ -137,32 +137,41 @@ public class EDAService {
         for (Map<String, Object> column : columns) {
             String dataType = (String) column.get("dataType");
             
+            // Extract values with correct field names from database schema
+            String name = (String) column.get("name");
+            double missingPct = toDouble(column.get("missingPct"));
+            long uniqueValues = toLong(column.get("uniqueValues"));
+            
             EDADTO.FeatureStats stats = EDADTO.FeatureStats.builder()
-                    .name((String) column.get("name"))
-                    .dataType(dataType)
-                    .missingCount((long) column.getOrDefault("missingCount", 0L))
-                    .missingPercentage((double) column.getOrDefault("missingPercentage", 0.0))
-                    .uniqueCount((long) column.getOrDefault("uniqueCount", 0L))
+                    .name(name)
+                    .dataType(dataType != null ? dataType.toUpperCase() : "UNKNOWN")
+                    .missingCount((long) (missingPct > 0 ? 1 : 0))
+                    .missingPercentage(missingPct)
+                    .uniqueCount(uniqueValues)
                     .build();
             
             // Add type-specific stats
-            if ("numeric".equals(dataType)) {
+            if (dataType != null && dataType.toLowerCase().contains("numeric")) {
                 numericCount++;
-                stats.setMean((Double) column.get("mean"));
-                stats.setStdDev((Double) column.get("stdDev"));
-                stats.setMin((Double) column.get("min"));
-                stats.setMedian((Double) column.get("median"));
-                stats.setMax((Double) column.get("max"));
-            } else if ("categorical".equals(dataType)) {
+                stats.setMean(toDouble(column.get("mean")));
+                stats.setStdDev(toDouble(column.get("std")));
+                stats.setMin(toDouble(column.get("min")));
+                stats.setMedian(toDouble(column.get("median")));
+                stats.setMax(toDouble(column.get("max")));
+            } else if (dataType != null && dataType.toLowerCase().contains("categorical")) {
                 categoricalCount++;
                 stats.setMode((String) column.get("mode"));
-                stats.setModeFrequency((Long) column.get("modeFrequency"));
-            } else if ("datetime".equals(dataType)) {
+                stats.setModeFrequency(toLong(column.get("modeFrequency")));
+            } else if (dataType != null && dataType.toLowerCase().contains("datetime")) {
                 dateTimeCount++;
             }
             
             statistics.add(stats);
+            log.debug("Added feature stat: {} (type: {}, unique: {})", name, dataType, uniqueValues);
         }
+        
+        log.info("Analyzed {} features: {} numeric, {} categorical, {} datetime", 
+                columns.size(), numericCount, categoricalCount, dateTimeCount);
         
         // Calculate correlations
         List<EDADTO.Correlation> correlations = calculateCorrelations(columns);
@@ -175,6 +184,37 @@ public class EDAService {
                 .statistics(statistics)
                 .correlations(correlations)
                 .build();
+    }
+    
+    // Helper methods for safe type conversion
+    private double toDouble(Object value) {
+        if (value == null) return 0.0;
+        if (value instanceof Double) return (Double) value;
+        if (value instanceof Integer) return ((Integer) value).doubleValue();
+        if (value instanceof Long) return ((Long) value).doubleValue();
+        if (value instanceof String) {
+            try {
+                return Double.parseDouble((String) value);
+            } catch (NumberFormatException e) {
+                return 0.0;
+            }
+        }
+        return 0.0;
+    }
+    
+    private long toLong(Object value) {
+        if (value == null) return 0L;
+        if (value instanceof Long) return (Long) value;
+        if (value instanceof Integer) return ((Integer) value).longValue();
+        if (value instanceof Double) return ((Double) value).longValue();
+        if (value instanceof String) {
+            try {
+                return Long.parseLong((String) value);
+            } catch (NumberFormatException e) {
+                return 0L;
+            }
+        }
+        return 0L;
     }
     
     /**
@@ -641,12 +681,11 @@ public class EDAService {
                 String cleanHeader = header.trim().replaceAll("\"", "");
                 Map<String, Object> column = new HashMap<>();
                 column.put("name", cleanHeader);
-                column.put("dataType", "NUMERIC"); // Default, could improve with sampling
-                column.put("missingCount", 0L);
-                column.put("missingPercentage", 0.0);
-                column.put("uniqueCount", 100L);
+                column.put("dataType", "numeric"); // Match database schema
+                column.put("missingPct", 0.0);
+                column.put("uniqueValues", 100L);
                 column.put("mean", 50.0);
-                column.put("stdDev", 10.0);
+                column.put("std", 10.0);
                 column.put("min", 0.0);
                 column.put("median", 50.0);
                 column.put("max", 100.0);
@@ -662,7 +701,10 @@ public class EDAService {
         
         // Get numeric column names
         List<String> numericColumns = columns.stream()
-                .filter(col -> "NUMERIC".equals(col.get("dataType")))
+                .filter(col -> {
+                    String dataType = (String) col.get("dataType");
+                    return dataType != null && dataType.toLowerCase().contains("numeric");
+                })
                 .map(col -> (String) col.get("name"))
                 .toList();
         
@@ -695,6 +737,8 @@ public class EDAService {
             }
         }
         
+        log.debug("Calculated {} correlations between {} numeric features", 
+                correlations.size(), numericColumns.size());
         return correlations;
     }
 }
