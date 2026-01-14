@@ -7,6 +7,7 @@
     <list default="true" id="c312ceb7-ea8b-4e75-937a-1792c69420e4" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/main/java/com/mlengine/client/FastAPIEvaluationClient.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/mlengine/client/FastAPIEvaluationClient.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/mlengine/model/dto/EvaluationDTO.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/mlengine/model/dto/EvaluationDTO.java" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -60,7 +61,8 @@
       <option name="filePath" />
       <method v="2" />
     </configuration>
-    <configuration default="true" type="OPA_TEST_RUN_CONFIGURATION" factoryName="Opa configuration factory">
+    <configuration default="true" type="OPA_RUN_CONFIGURATION" factoryName="Opa configuration factory">
+      <option name="query" value="" />
       <option name="additionalargs" value="" />
       <envs />
       <method v="2" />

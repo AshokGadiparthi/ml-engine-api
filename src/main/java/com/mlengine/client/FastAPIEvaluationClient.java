@@ -17,8 +17,12 @@ import java.util.HashMap;
 import java.util.Arrays;
 
 /**
- * FastAPI Evaluation Client
+ * FastAPI Evaluation Client - FIXED VERSION
  * Communicates with Python FastAPI service (Layer 3) for model evaluation
+ *
+ * FIXES:
+ * 1. Fixed health endpoint path (removed /threshold)
+ * 2. Updated completeEvaluation to properly handle 2D X_test arrays
  */
 @Slf4j
 @Component
@@ -41,9 +45,14 @@ public class FastAPIEvaluationClient {
         this.restTemplate = new RestTemplate();
     }
 
+    /**
+     * Check if FastAPI evaluation service is available
+     * FIXED: Corrected health endpoint path
+     */
     public boolean isServiceAvailable() {
         try {
-            String url = fastApiBaseUrl + evaluationEndpoint + "/threshold/health";
+            // FIXED: Changed from /threshold/health to /health
+            String url = fastApiBaseUrl + evaluationEndpoint + "/health";
             Map response = restTemplate.getForObject(url, Map.class);
             log.info("FastAPI Evaluation service is available");
             return response != null;
@@ -53,6 +62,9 @@ public class FastAPIEvaluationClient {
         }
     }
 
+    /**
+     * Evaluate model at specific threshold
+     */
     public Map<String, Object> evaluateWithThreshold(
             String modelId,
             double[] yTrue,
@@ -86,6 +98,9 @@ public class FastAPIEvaluationClient {
         }
     }
 
+    /**
+     * Calculate business impact of predictions
+     */
     public Map<String, Object> calculateBusinessImpact(
             String modelId,
             Map<String, Object> evaluationResult,
@@ -121,6 +136,9 @@ public class FastAPIEvaluationClient {
         }
     }
 
+    /**
+     * Find optimal threshold for profit maximization
+     */
     public Map<String, Object> getOptimalThreshold(
             String modelId,
             double[] yTrue,
@@ -156,6 +174,9 @@ public class FastAPIEvaluationClient {
         }
     }
 
+    /**
+     * Assess production readiness with 18-point checklist
+     */
     public Map<String, Object> assessProductionReadiness(
             String modelId,
             Map<String, Object> evalResult,
@@ -189,9 +210,17 @@ public class FastAPIEvaluationClient {
         }
     }
 
+    /**
+     * Complete model evaluation in one call
+     *
+     * FIXED:
+     * - Changed xTest parameter from double[] to double[][]
+     * - Proper handling of 2D feature matrix
+     * - X_test field name alignment with FastAPI backend
+     */
     public Map<String, Object> completeEvaluation(
             String modelId,
-            double[] xTest,
+            double[][] xTest,           // FIXED: Changed from double[] to double[][]
             double[] yTest,
             double[] yPredProba,
             double[] yTrain,
@@ -208,26 +237,26 @@ public class FastAPIEvaluationClient {
 
             Map<String, Object> requestBody = new HashMap<>();
 
-            // Convert 1D x_test array to 2D for FastAPI compatibility
-            if (xTest != null) {
-                double[][] xTestReshaped = new double[yTest.length][1];
-                for (int i = 0; i < yTest.length && i < xTest.length; i++) {
-                    xTestReshaped[i][0] = xTest[i];
-                }
-                requestBody.put("x_test", xTestReshaped);
-                log.info("Reshaped x_test from 1D to 2D ({}x1)", yTest.length);
+            // FIXED: X_test is now a 2D array, send directly without reshaping
+            if (xTest != null && xTest.length > 0) {
+                requestBody.put("X_test", xTest);  // Send 2D array directly
+                log.info("X_test shape: {}x{}", xTest.length, xTest[0].length);
+            } else {
+                log.warn("X_test is null or empty for model {}", modelId);
             }
 
             // Required fields
             requestBody.put("y_test", yTest);
             requestBody.put("y_pred_proba", yPredProba);
 
-            // Only include if provided
-            if (yTrain != null) {
+            // Optional fields - only include if provided
+            if (yTrain != null && yTrain.length > 0) {
                 requestBody.put("y_train", yTrain);
+                log.debug("Including y_train with {} samples", yTrain.length);
             }
-            if (yPredTrain != null) {
+            if (yPredTrain != null && yPredTrain.length > 0) {
                 requestBody.put("y_pred_train", yPredTrain);
+                log.debug("Including y_pred_train with {} samples", yPredTrain.length);
             }
 
             // Required fields
@@ -235,6 +264,8 @@ public class FastAPIEvaluationClient {
             requestBody.put("cost_fp", costFp);
             requestBody.put("cost_fn", costFn);
             requestBody.put("revenue_tp", revenueTp);
+
+            log.debug("Complete evaluation request body: {}", requestBody.keySet());
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
@@ -251,6 +282,9 @@ public class FastAPIEvaluationClient {
         }
     }
 
+    /**
+     * Get health status of evaluation service
+     */
     public Map<String, Object> getHealthStatus() {
         try {
             String url = fastApiBaseUrl + evaluationEndpoint + "/health";

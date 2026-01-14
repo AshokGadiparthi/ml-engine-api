@@ -222,8 +222,8 @@ public class EvaluationDTO {
     public static class CompleteEvaluationRequest implements Serializable {
 
         @JsonProperty("x_test")
-        @Schema(description = "Test feature matrix")
-        private double[] xTest;
+        @Schema(description = "Test feature matrix (samples x features)")
+        private double[][] xTest;  // FIXED: Changed from double[] to double[][] for proper 2D array
 
         @JsonProperty("y_test")
         @NotNull(message = "y_test cannot be null")
