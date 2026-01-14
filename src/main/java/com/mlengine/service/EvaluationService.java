@@ -442,14 +442,23 @@ public class EvaluationService {
             String modelId
     ) {
         try {
-            Object scoreObj = result.get("overall_score");
+            log.debug("Converting complete evaluation response with keys: {}", result.keySet());
 
-            return EvaluationDTO.CompleteEvaluationResponse.builder()
-                    .modelId(modelId)
-                    .overallScore(scoreObj != null ? ((Number) scoreObj).doubleValue() : null)
-                    .build();
+            // Use the static builder method to create from FastAPI response
+            EvaluationDTO.CompleteEvaluationResponse response =
+                    EvaluationDTO.CompleteEvaluationResponse.fromFastAPIResponse(result);
+
+            // Ensure modelId is set if not in response
+            if (response.getModelId() == null || response.getModelId().isEmpty()) {
+                response.setModelId(modelId);
+            }
+
+            log.info("Complete evaluation response converted successfully");
+            return response;
+
         } catch (Exception e) {
             log.error("Error converting complete evaluation response: {}", e.getMessage(), e);
+            log.error("Response structure: {}", result);
             throw new RuntimeException("Failed to convert complete evaluation response", e);
         }
     }
