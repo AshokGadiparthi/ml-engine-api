@@ -220,20 +220,25 @@ public class EvaluationDTO {
     @Schema(description = "Request for complete evaluation (all metrics)")
     public static class CompleteEvaluationRequest implements Serializable {
 
+        @JsonProperty("x_test")
         @Schema(description = "Test feature matrix")
         private double[] xTest;
 
+        @JsonProperty("y_test")
         @NotNull(message = "y_test cannot be null")
         @Schema(description = "Test labels")
         private double[] yTest;
 
+        @JsonProperty("y_pred_proba")
         @NotNull(message = "y_pred_proba cannot be null")
         @Schema(description = "Test predictions")
         private double[] yPredProba;
 
+        @JsonProperty("y_train")
         @Schema(description = "Train labels")
         private double[] yTrain;
 
+        @JsonProperty("y_pred_train")
         @Schema(description = "Train predictions")
         private double[] yPredTrain;
 
@@ -243,14 +248,17 @@ public class EvaluationDTO {
         @Schema(description = "Threshold for evaluation", example = "0.5")
         private Double threshold;
 
+        @JsonProperty("cost_fp")
         @NotNull(message = "cost_fp cannot be null")
         @Schema(description = "Cost of false positive", example = "500")
         private Double costFp;
 
+        @JsonProperty("cost_fn")
         @NotNull(message = "cost_fn cannot be null")
         @Schema(description = "Cost of false negative", example = "2000")
         private Double costFn;
 
+        @JsonProperty("revenue_tp")
         @NotNull(message = "revenue_tp cannot be null")
         @Schema(description = "Revenue from true positive", example = "1000")
         private Double revenueTp;
