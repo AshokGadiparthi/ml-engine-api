@@ -208,9 +208,14 @@ public class FastAPIEvaluationClient {
 
             Map<String, Object> requestBody = new HashMap<>();
 
-            // Only include non-null optional fields
+            // Convert 1D x_test array to 2D for FastAPI compatibility
             if (xTest != null) {
-                requestBody.put("x_test", xTest);
+                double[][] xTestReshaped = new double[yTest.length][1];
+                for (int i = 0; i < yTest.length && i < xTest.length; i++) {
+                    xTestReshaped[i][0] = xTest[i];
+                }
+                requestBody.put("x_test", xTestReshaped);
+                log.info("Reshaped x_test from 1D to 2D ({}x1)", yTest.length);
             }
 
             // Required fields
