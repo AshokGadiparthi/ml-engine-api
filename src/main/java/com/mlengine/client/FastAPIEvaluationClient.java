@@ -207,11 +207,11 @@ public class FastAPIEvaluationClient {
             String url = fastApiBaseUrl + evaluationEndpoint + "/complete/" + modelId;
 
             Map<String, Object> requestBody = new HashMap<>();
-            requestBody.put("X_test", xTest);
+            requestBody.put("x_test", xTest);
             requestBody.put("y_test", yTest);
             requestBody.put("y_pred_proba", yPredProba);
             requestBody.put("y_train", yTrain);
-            requestBody.put("y_pred_train_proba", yPredTrain);
+            requestBody.put("y_pred_train", yPredTrain);
             requestBody.put("threshold", threshold);
             requestBody.put("cost_fp", costFp);
             requestBody.put("cost_fn", costFn);
