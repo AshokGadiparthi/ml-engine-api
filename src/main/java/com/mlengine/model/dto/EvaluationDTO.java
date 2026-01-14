@@ -211,6 +211,74 @@ public class EvaluationDTO {
         private List<ReadinessCriterion> criteria;
     }
 
+    // ==================== COMPLETE EVALUATION ====================
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    @Schema(description = "Request for complete evaluation (all metrics)")
+    public static class CompleteEvaluationRequest implements Serializable {
+
+        @Schema(description = "Test feature matrix")
+        private double[] xTest;
+
+        @NotNull(message = "y_test cannot be null")
+        @Schema(description = "Test labels")
+        private double[] yTest;
+
+        @NotNull(message = "y_pred_proba cannot be null")
+        @Schema(description = "Test predictions")
+        private double[] yPredProba;
+
+        @Schema(description = "Train labels")
+        private double[] yTrain;
+
+        @Schema(description = "Train predictions")
+        private double[] yPredTrain;
+
+        @NotNull(message = "threshold cannot be null")
+        @DecimalMin(value = "0.0")
+        @DecimalMax(value = "1.0")
+        @Schema(description = "Threshold for evaluation", example = "0.5")
+        private Double threshold;
+
+        @NotNull(message = "cost_fp cannot be null")
+        @Schema(description = "Cost of false positive", example = "500")
+        private Double costFp;
+
+        @NotNull(message = "cost_fn cannot be null")
+        @Schema(description = "Cost of false negative", example = "2000")
+        private Double costFn;
+
+        @NotNull(message = "revenue_tp cannot be null")
+        @Schema(description = "Revenue from true positive", example = "1000")
+        private Double revenueTp;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    @Schema(description = "Complete evaluation response with all metrics")
+    public static class CompleteEvaluationResponse implements Serializable {
+
+        @Schema(description = "Model identifier")
+        private String modelId;
+
+        @Schema(description = "Threshold evaluation results")
+        private ThresholdEvaluationResponse thresholdEvaluation;
+
+        @Schema(description = "Business impact results")
+        private BusinessImpactResponse businessImpact;
+
+        @Schema(description = "Production readiness assessment")
+        private ProductionReadinessResponse productionReadiness;
+
+        @Schema(description = "Overall quality score")
+        private Double overallScore;
+    }
+
     // ==================== SHARED MODELS ====================
 
     @Data
