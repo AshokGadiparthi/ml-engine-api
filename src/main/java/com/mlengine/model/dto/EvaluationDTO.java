@@ -11,6 +11,7 @@ import java.io.Serializable;
 import java.util.List;
 import java.util.Map;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonAnySetter;
 
 /**
  * DTOs for Model Evaluation API (Layer 3 Integration)
