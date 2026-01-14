@@ -11,8 +11,6 @@ import java.util.Map;
  * Evaluation Service
  * Handles business logic for model evaluation, business impact analysis,
  * production readiness assessment, and threshold optimization.
- *
- * Delegates to FastAPI Layer 3 for actual evaluation computation.
  */
 @Slf4j
 @Service
@@ -21,13 +19,6 @@ public class EvaluationService {
 
     private final FastAPIEvaluationClient fastAPIClient;
 
-    /**
-     * Evaluate model at specific threshold
-     *
-     * @param modelId Model identifier
-     * @param request Evaluation request with y_true, y_pred_proba, and threshold
-     * @return Threshold evaluation response with metrics, confusion matrix, and rates
-     */
     public EvaluationDTO.ThresholdEvaluationResponse evaluateWithThreshold(
             String modelId,
             EvaluationDTO.ThresholdEvaluationRequest request
@@ -51,13 +42,6 @@ public class EvaluationService {
         }
     }
 
-    /**
-     * Calculate business impact of model predictions
-     *
-     * @param modelId Model identifier
-     * @param request Business impact request with costs and revenue
-     * @return Business impact response with financial metrics
-     */
     public EvaluationDTO.BusinessImpactResponse calculateBusinessImpact(
             String modelId,
             EvaluationDTO.BusinessImpactRequest request
@@ -82,13 +66,6 @@ public class EvaluationService {
         }
     }
 
-    /**
-     * Find optimal classification threshold based on costs and revenue
-     *
-     * @param modelId Model identifier
-     * @param request Request with y_true, y_pred_proba, and financial parameters
-     * @return Optimal threshold response with threshold value and expected profit
-     */
     public EvaluationDTO.OptimalThresholdResponse findOptimalThreshold(
             String modelId,
             EvaluationDTO.OptimalThresholdRequest request
@@ -113,13 +90,6 @@ public class EvaluationService {
         }
     }
 
-    /**
-     * Assess model's production readiness
-     *
-     * @param modelId Model identifier
-     * @param request Request with evaluation, learning curve, and business impact data
-     * @return Production readiness assessment with checklist and status
-     */
     public EvaluationDTO.ProductionReadinessResponse assessProductionReadiness(
             String modelId,
             EvaluationDTO.ProductionReadinessRequest request
@@ -143,13 +113,6 @@ public class EvaluationService {
         }
     }
 
-    /**
-     * Run complete evaluation with all metrics
-     *
-     * @param modelId Model identifier
-     * @param request Complete evaluation request
-     * @return Complete evaluation response with all metrics combined
-     */
     public EvaluationDTO.CompleteEvaluationResponse completeEvaluation(
             String modelId,
             EvaluationDTO.CompleteEvaluationRequest request
@@ -178,21 +141,13 @@ public class EvaluationService {
         }
     }
 
-    /**
-     * Check if evaluation service is available
-     */
     public boolean isServiceAvailable() {
         return fastAPIClient.isServiceAvailable();
     }
 
-    /**
-     * Get service health status
-     */
     public Map<String, Object> getHealthStatus() {
         return fastAPIClient.getHealthStatus();
     }
-
-    // ==================== CONVERSION HELPERS ====================
 
     @SuppressWarnings("unchecked")
     private EvaluationDTO.ThresholdEvaluationResponse convertToThresholdResponse(
@@ -333,9 +288,6 @@ public class EvaluationService {
                 .build();
     }
 
-    /**
-     * Safe conversion to Double, returns null if value is null
-     */
     private Double toDouble(Object value) {
         if (value == null) return null;
         return ((Number) value).doubleValue();

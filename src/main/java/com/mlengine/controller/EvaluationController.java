@@ -21,48 +21,27 @@ import java.util.Map;
 
 /**
  * REST Controller for Model Evaluation (Layer 1 - Java API)
- *
- * Provides endpoints for:
- * - Threshold-based evaluation
- * - Business impact analysis
- * - Optimal threshold finding
- * - Production readiness assessment
- * - Complete evaluation
- *
- * Delegates to Layer 3 (FastAPI) for actual computation.
+ * Provides endpoints for threshold analysis, business impact, and production readiness
  */
 @Slf4j
 @RestController
 @RequestMapping("/api/evaluation")
 @RequiredArgsConstructor
-@Tag(name = "Model Evaluation", description = "Model evaluation endpoints for threshold analysis, business impact, and production readiness")
+@Tag(name = "Model Evaluation", description = "Model evaluation endpoints")
 @CrossOrigin
 public class EvaluationController {
 
     private final EvaluationService evaluationService;
 
-    // ==================== THRESHOLD EVALUATION ====================
-
-    /**
-     * Evaluate model at specific threshold
-     * POST /api/evaluation/threshold/{model_id}
-     *
-     * Calculates confusion matrix, metrics, and rates at a specific threshold.
-     */
     @PostMapping("/threshold/{model_id}")
-    @Operation(
-            summary = "Evaluate model at threshold",
-            description = "Evaluate model predictions at a specific classification threshold. " +
-                    "Generates confusion matrix, accuracy metrics, and classification rates."
-    )
+    @Operation(summary = "Evaluate model at threshold", description = "Evaluate model at specific classification threshold")
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Evaluation completed successfully",
-                    content = @Content(schema = @Schema(implementation = EvaluationDTO.ThresholdEvaluationResponse.class))),
+            @ApiResponse(responseCode = "200", description = "Evaluation completed successfully"),
             @ApiResponse(responseCode = "400", description = "Invalid request parameters"),
             @ApiResponse(responseCode = "500", description = "Evaluation failed")
     })
     public ResponseEntity<EvaluationDTO.ThresholdEvaluationResponse> evaluateWithThreshold(
-            @Parameter(description = "Model identifier", example = "model_123")
+            @Parameter(description = "Model identifier")
             @PathVariable("model_id") String modelId,
 
             @Valid @RequestBody EvaluationDTO.ThresholdEvaluationRequest request
@@ -80,25 +59,11 @@ public class EvaluationController {
         }
     }
 
-    // ==================== BUSINESS IMPACT ====================
-
-    /**
-     * Calculate business impact of model
-     * POST /api/evaluation/business-impact/{model_id}
-     *
-     * Analyzes financial impact including costs of errors and revenue from correct predictions.
-     */
     @PostMapping("/business-impact/{model_id}")
-    @Operation(
-            summary = "Calculate business impact",
-            description = "Calculate financial impact of model predictions including " +
-                    "costs from false positives/negatives and revenue from true positives. " +
-                    "Requires output from threshold evaluation."
-    )
+    @Operation(summary = "Calculate business impact", description = "Calculate financial impact of model predictions")
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Impact calculated successfully",
-                    content = @Content(schema = @Schema(implementation = EvaluationDTO.BusinessImpactResponse.class))),
-            @ApiResponse(responseCode = "400", description = "Invalid request - missing or invalid evaluation_result"),
+            @ApiResponse(responseCode = "200", description = "Impact calculated successfully"),
+            @ApiResponse(responseCode = "400", description = "Invalid request"),
             @ApiResponse(responseCode = "500", description = "Calculation failed")
     })
     public ResponseEntity<EvaluationDTO.BusinessImpactResponse> calculateBusinessImpact(
@@ -120,23 +85,10 @@ public class EvaluationController {
         }
     }
 
-    // ==================== OPTIMAL THRESHOLD ====================
-
-    /**
-     * Find optimal classification threshold
-     * POST /api/evaluation/optimal-threshold/{model_id}
-     *
-     * Calculates the threshold that maximizes profit based on costs and revenue.
-     */
     @PostMapping("/optimal-threshold/{model_id}")
-    @Operation(
-            summary = "Find optimal threshold",
-            description = "Find the optimal classification threshold that maximizes profit " +
-                    "based on costs of errors and revenue from correct predictions."
-    )
+    @Operation(summary = "Find optimal threshold", description = "Find optimal threshold for profit maximization")
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Optimal threshold found",
-                    content = @Content(schema = @Schema(implementation = EvaluationDTO.OptimalThresholdResponse.class))),
+            @ApiResponse(responseCode = "200", description = "Optimal threshold found"),
             @ApiResponse(responseCode = "400", description = "Invalid request parameters"),
             @ApiResponse(responseCode = "500", description = "Calculation failed")
     })
@@ -159,23 +111,10 @@ public class EvaluationController {
         }
     }
 
-    // ==================== PRODUCTION READINESS ====================
-
-    /**
-     * Assess production readiness
-     * POST /api/evaluation/production-readiness/{model_id}
-     *
-     * Comprehensive assessment of model readiness for production deployment.
-     */
     @PostMapping("/production-readiness/{model_id}")
-    @Operation(
-            summary = "Assess production readiness",
-            description = "Comprehensive assessment of model readiness for production deployment. " +
-                    "Evaluates performance stability, business viability, and other criteria."
-    )
+    @Operation(summary = "Assess production readiness", description = "Assess model readiness for production deployment")
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Assessment completed successfully",
-                    content = @Content(schema = @Schema(implementation = EvaluationDTO.ProductionReadinessResponse.class))),
+            @ApiResponse(responseCode = "200", description = "Assessment completed successfully"),
             @ApiResponse(responseCode = "400", description = "Invalid request parameters"),
             @ApiResponse(responseCode = "500", description = "Assessment failed")
     })
@@ -198,23 +137,10 @@ public class EvaluationController {
         }
     }
 
-    // ==================== COMPLETE EVALUATION ====================
-
-    /**
-     * Run complete evaluation
-     * POST /api/evaluation/complete/{model_id}
-     *
-     * All-in-one endpoint that performs comprehensive evaluation.
-     */
     @PostMapping("/complete/{model_id}")
-    @Operation(
-            summary = "Complete evaluation",
-            description = "Perform complete evaluation with all metrics including threshold analysis, " +
-                    "business impact, and production readiness assessment."
-    )
+    @Operation(summary = "Complete evaluation", description = "Perform complete evaluation with all metrics")
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Complete evaluation finished",
-                    content = @Content(schema = @Schema(implementation = EvaluationDTO.CompleteEvaluationResponse.class))),
+            @ApiResponse(responseCode = "200", description = "Complete evaluation finished"),
             @ApiResponse(responseCode = "400", description = "Invalid request parameters"),
             @ApiResponse(responseCode = "500", description = "Evaluation failed")
     })
@@ -237,17 +163,8 @@ public class EvaluationController {
         }
     }
 
-    // ==================== HEALTH & STATUS ====================
-
-    /**
-     * Health check for evaluation service
-     * GET /api/evaluation/health
-     */
     @GetMapping("/health")
-    @Operation(
-            summary = "Health check",
-            description = "Check if the evaluation service and underlying FastAPI backend are operational"
-    )
+    @Operation(summary = "Health check", description = "Check if evaluation service is operational")
     @ApiResponse(responseCode = "200", description = "Service is healthy")
     public ResponseEntity<Map<String, Object>> health() {
         log.info("Health check requested");
@@ -271,15 +188,8 @@ public class EvaluationController {
         }
     }
 
-    /**
-     * Get service status
-     * GET /api/evaluation/status
-     */
     @GetMapping("/status")
-    @Operation(
-            summary = "Service status",
-            description = "Get detailed status of evaluation service"
-    )
+    @Operation(summary = "Service status", description = "Get detailed status of evaluation service")
     @ApiResponse(responseCode = "200", description = "Status retrieved")
     public ResponseEntity<Map<String, Object>> getStatus() {
         log.info("Status check requested");
@@ -294,24 +204,15 @@ public class EvaluationController {
         }
     }
 
-    // ==================== INFO ====================
-
-    /**
-     * Get evaluation API documentation
-     * GET /api/evaluation/info
-     */
     @GetMapping("/info")
-    @Operation(
-            summary = "API information",
-            description = "Get information about available evaluation endpoints"
-    )
+    @Operation(summary = "API information", description = "Get information about available evaluation endpoints")
     @ApiResponse(responseCode = "200", description = "Information retrieved")
     public ResponseEntity<Map<String, Object>> getInfo() {
         log.info("Info requested");
 
         Map<String, Object> info = new HashMap<>();
         info.put("service", "Model Evaluation API (Layer 1 - Java)");
-        info.put("description", "Provides model evaluation, threshold analysis, business impact calculation, and production readiness assessment");
+        info.put("description", "Model evaluation and production readiness assessment");
         info.put("version", "1.0.0");
         info.put("backend", "FastAPI Layer 3");
 
