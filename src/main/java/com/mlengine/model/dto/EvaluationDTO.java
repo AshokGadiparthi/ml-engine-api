@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonAnySetter;
+import java.util.HashMap;
 
 /**
  * DTOs for Model Evaluation API (Layer 3 Integration)
