@@ -271,7 +271,7 @@ public class EvaluationDTO {
     @AllArgsConstructor
     @Builder
     @Schema(description = "Complete evaluation response with all metrics")
-    public class CompleteEvaluationResponse implements Serializable {
+    public static class CompleteEvaluationResponse implements Serializable {
 
         @JsonProperty("model_id")
         @Schema(description = "Model identifier")
