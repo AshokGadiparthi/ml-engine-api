@@ -2,15 +2,18 @@ package com.mlengine.service;
 
 import com.mlengine.client.FastAPIEvaluationClient;
 import com.mlengine.model.dto.EvaluationDTO;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
- * Evaluation Service
- * Handles business logic for model evaluation, business impact analysis,
- * production readiness assessment, and threshold optimization.
+ * Evaluation Service - FIXED VERSION
+ * Handles business logic for model evaluation with proper snake_case handling
  */
 @Slf4j
 @Service
@@ -18,6 +21,9 @@ import java.util.Map;
 public class EvaluationService {
 
     private final FastAPIEvaluationClient fastAPIClient;
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    // ==================== THRESHOLD EVALUATION ====================
 
     public EvaluationDTO.ThresholdEvaluationResponse evaluateWithThreshold(
             String modelId,
@@ -37,10 +43,12 @@ public class EvaluationService {
             return convertToThresholdResponse(result, modelId);
 
         } catch (Exception e) {
-            log.error("Error evaluating model with threshold: {}", e.getMessage());
+            log.error("Error evaluating model with threshold: {}", e.getMessage(), e);
             throw new RuntimeException("Failed to evaluate model at threshold", e);
         }
     }
+
+    // ==================== BUSINESS IMPACT ====================
 
     public EvaluationDTO.BusinessImpactResponse calculateBusinessImpact(
             String modelId,
@@ -49,9 +57,12 @@ public class EvaluationService {
         log.info("Calculating business impact for model {}", modelId);
 
         try {
+            // Convert the DTO evaluation_result back to snake_case for FastAPI
+            Map<String, Object> evalResultSnakeCase = convertDTOToSnakeCaseMap(request.getEvaluationResult());
+
             Map<String, Object> result = fastAPIClient.calculateBusinessImpact(
                     modelId,
-                    request.getEvaluationResult(),
+                    evalResultSnakeCase,
                     request.getCostFalsePositive(),
                     request.getCostFalseNegative(),
                     request.getRevenueTruePositive(),
@@ -61,10 +72,12 @@ public class EvaluationService {
             return convertToBusinessImpactResponse(result, modelId);
 
         } catch (Exception e) {
-            log.error("Error calculating business impact: {}", e.getMessage());
+            log.error("Error calculating business impact: {}", e.getMessage(), e);
             throw new RuntimeException("Failed to calculate business impact", e);
         }
     }
+
+    // ==================== OPTIMAL THRESHOLD ====================
 
     public EvaluationDTO.OptimalThresholdResponse findOptimalThreshold(
             String modelId,
@@ -85,10 +98,12 @@ public class EvaluationService {
             return convertToOptimalThresholdResponse(result, modelId);
 
         } catch (Exception e) {
-            log.error("Error finding optimal threshold: {}", e.getMessage());
+            log.error("Error finding optimal threshold: {}", e.getMessage(), e);
             throw new RuntimeException("Failed to find optimal threshold", e);
         }
     }
+
+    // ==================== PRODUCTION READINESS ====================
 
     public EvaluationDTO.ProductionReadinessResponse assessProductionReadiness(
             String modelId,
@@ -97,21 +112,27 @@ public class EvaluationService {
         log.info("Assessing production readiness for model {}", modelId);
 
         try {
+            // Convert DTOs back to snake_case for FastAPI
+            Map<String, Object> evalResultSnakeCase = convertDTOToSnakeCaseMap(request.getEvalResult());
+            Map<String, Object> businessImpactSnakeCase = convertDTOToSnakeCaseMap(request.getBusinessImpact());
+
             Map<String, Object> result = fastAPIClient.assessProductionReadiness(
                     modelId,
-                    request.getEvalResult(),
+                    evalResultSnakeCase,
                     request.getLearningCurve(),
-                    request.getBusinessImpact(),
+                    businessImpactSnakeCase,
                     request.getFeatureImportance()
             );
 
             return convertToProductionReadinessResponse(result, modelId);
 
         } catch (Exception e) {
-            log.error("Error assessing production readiness: {}", e.getMessage());
+            log.error("Error assessing production readiness: {}", e.getMessage(), e);
             throw new RuntimeException("Failed to assess production readiness", e);
         }
     }
+
+    // ==================== COMPLETE EVALUATION ====================
 
     public EvaluationDTO.CompleteEvaluationResponse completeEvaluation(
             String modelId,
@@ -136,10 +157,12 @@ public class EvaluationService {
             return convertToCompleteEvaluationResponse(result, modelId);
 
         } catch (Exception e) {
-            log.error("Error in complete evaluation: {}", e.getMessage());
+            log.error("Error in complete evaluation: {}", e.getMessage(), e);
             throw new RuntimeException("Failed to complete evaluation", e);
         }
     }
+
+    // ==================== HEALTH & STATUS ====================
 
     public boolean isServiceAvailable() {
         return fastAPIClient.isServiceAvailable();
@@ -149,18 +172,77 @@ public class EvaluationService {
         return fastAPIClient.getHealthStatus();
     }
 
+    // ==================== CONVERSION METHODS ====================
+
+    /**
+     * Convert DTO objects back to snake_case Map for FastAPI
+     */
+    private Map<String, Object> convertDTOToSnakeCaseMap(Object dto) {
+        if (dto == null) return null;
+        // Convert DTO to Map using Jackson, then convert keys to snake_case
+        Map<String, Object> map = objectMapper.convertValue(dto, Map.class);
+        return convertKeysToSnakeCase(map);
+    }
+
+    /**
+     * Recursively convert all map keys from camelCase to snake_case
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> convertKeysToSnakeCase(Map<String, Object> map) {
+        if (map == null) return null;
+
+        Map<String, Object> result = new HashMap<>();
+        for (Map.Entry<String, Object> entry : map.entrySet()) {
+            String snakeCaseKey = camelToSnakeCase(entry.getKey());
+            Object value = entry.getValue();
+
+            if (value instanceof Map) {
+                value = convertKeysToSnakeCase((Map<String, Object>) value);
+            } else if (value instanceof List) {
+                // Lists are fine as-is
+            }
+
+            result.put(snakeCaseKey, value);
+        }
+        return result;
+    }
+
+    /**
+     * Convert camelCase to snake_case
+     */
+    private String camelToSnakeCase(String str) {
+        return str.replaceAll("([a-z])([A-Z]+)", "$1_$2").toLowerCase();
+    }
+
+    // ==================== RESPONSE CONVERTERS ====================
+
     @SuppressWarnings("unchecked")
     private EvaluationDTO.ThresholdEvaluationResponse convertToThresholdResponse(
             Map<String, Object> result,
             String modelId
     ) {
-        return EvaluationDTO.ThresholdEvaluationResponse.builder()
-                .modelId(modelId)
-                .threshold(((Number) result.get("threshold")).doubleValue())
-                .confusionMatrix(convertConfusionMatrix((Map<String, Object>) result.get("confusion_matrix")))
-                .metrics(convertMetrics((Map<String, Object>) result.get("metrics")))
-                .rates(convertRates((Map<String, Object>) result.get("rates")))
-                .build();
+        try {
+            Object threshold = result.get("threshold");
+            Object confusionMatrixObj = result.get("confusion_matrix");
+            Object metricsObj = result.get("metrics");
+            Object ratesObj = result.get("rates");
+
+            if (threshold == null || confusionMatrixObj == null || metricsObj == null || ratesObj == null) {
+                log.error("Missing required fields in threshold response: {}", result.keySet());
+                throw new RuntimeException("Invalid response structure from FastAPI");
+            }
+
+            return EvaluationDTO.ThresholdEvaluationResponse.builder()
+                    .modelId(modelId)
+                    .threshold(((Number) threshold).doubleValue())
+                    .confusionMatrix(convertConfusionMatrix((Map<String, Object>) confusionMatrixObj))
+                    .metrics(convertMetrics((Map<String, Object>) metricsObj))
+                    .rates(convertRates((Map<String, Object>) ratesObj))
+                    .build();
+        } catch (Exception e) {
+            log.error("Error converting threshold response: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to convert threshold response", e);
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -168,12 +250,25 @@ public class EvaluationService {
             Map<String, Object> result,
             String modelId
     ) {
-        return EvaluationDTO.BusinessImpactResponse.builder()
-                .modelId(modelId)
-                .costs(convertCostMetrics((Map<String, Object>) result.get("costs")))
-                .revenue(convertRevenueMetrics((Map<String, Object>) result.get("revenue")))
-                .financial(convertFinancialSummary((Map<String, Object>) result.get("financial")))
-                .build();
+        try {
+            Object costsObj = result.get("costs");
+            Object revenueObj = result.get("revenue");
+            Object financialObj = result.get("financial");
+
+            if (costsObj == null || revenueObj == null || financialObj == null) {
+                throw new RuntimeException("Invalid business impact response structure");
+            }
+
+            return EvaluationDTO.BusinessImpactResponse.builder()
+                    .modelId(modelId)
+                    .costs(convertCostMetrics((Map<String, Object>) costsObj))
+                    .revenue(convertRevenueMetrics((Map<String, Object>) revenueObj))
+                    .financial(convertFinancialSummary((Map<String, Object>) financialObj))
+                    .build();
+        } catch (Exception e) {
+            log.error("Error converting business impact response: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to convert business impact response", e);
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -181,12 +276,26 @@ public class EvaluationService {
             Map<String, Object> result,
             String modelId
     ) {
-        return EvaluationDTO.OptimalThresholdResponse.builder()
-                .modelId(modelId)
-                .optimalThreshold(((Number) result.get("optimal_threshold")).doubleValue())
-                .expectedProfit(((Number) result.get("expected_profit")).doubleValue())
-                .metricsAtThreshold(convertMetrics((Map<String, Object>) result.get("metrics_at_threshold")))
-                .build();
+        try {
+            Object optimalThreshold = result.get("optimal_threshold");
+            Object expectedProfit = result.get("expected_profit");
+            Object metricsObj = result.get("metrics_at_threshold");
+
+            if (optimalThreshold == null || expectedProfit == null) {
+                log.warn("Missing fields in optimal threshold response. Keys: {}", result.keySet());
+                throw new RuntimeException("Invalid optimal threshold response");
+            }
+
+            return EvaluationDTO.OptimalThresholdResponse.builder()
+                    .modelId(modelId)
+                    .optimalThreshold(((Number) optimalThreshold).doubleValue())
+                    .expectedProfit(((Number) expectedProfit).doubleValue())
+                    .metricsAtThreshold(metricsObj != null ? convertMetrics((Map<String, Object>) metricsObj) : null)
+                    .build();
+        } catch (Exception e) {
+            log.error("Error converting optimal threshold response: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to convert optimal threshold response", e);
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -194,11 +303,25 @@ public class EvaluationService {
             Map<String, Object> result,
             String modelId
     ) {
-        return EvaluationDTO.ProductionReadinessResponse.builder()
-                .modelId(modelId)
-                .overallStatus((String) result.get("overall_status"))
-                .summary(convertReadinessSummary((Map<String, Object>) result.get("summary")))
-                .build();
+        try {
+            Object statusObj = result.get("overall_status");
+            Object summaryObj = result.get("summary");
+            Object criteriaObj = result.get("criteria");
+
+            if (statusObj == null || summaryObj == null) {
+                throw new RuntimeException("Invalid production readiness response");
+            }
+
+            return EvaluationDTO.ProductionReadinessResponse.builder()
+                    .modelId(modelId)
+                    .overallStatus((String) statusObj)
+                    .summary(convertReadinessSummary((Map<String, Object>) summaryObj))
+                    .criteria(criteriaObj != null ? (List<EvaluationDTO.ReadinessCriterion>) criteriaObj : null)
+                    .build();
+        } catch (Exception e) {
+            log.error("Error converting production readiness response: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to convert production readiness response", e);
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -206,21 +329,39 @@ public class EvaluationService {
             Map<String, Object> result,
             String modelId
     ) {
-        return EvaluationDTO.CompleteEvaluationResponse.builder()
-                .modelId(modelId)
-                .overallScore(((Number) result.get("overall_score")).doubleValue())
-                .build();
+        try {
+            Object thresholdObj = result.get("threshold_evaluation");
+            Object impactObj = result.get("business_impact");
+            Object readinessObj = result.get("production_readiness");
+            Object scoreObj = result.get("overall_score");
+
+            return EvaluationDTO.CompleteEvaluationResponse.builder()
+                    .modelId(modelId)
+                    .thresholdEvaluation(thresholdObj != null ?
+                            convertToThresholdResponse((Map<String, Object>) thresholdObj, modelId) : null)
+                    .businessImpact(impactObj != null ?
+                            convertToBusinessImpactResponse((Map<String, Object>) impactObj, modelId) : null)
+                    .productionReadiness(readinessObj != null ?
+                            convertToProductionReadinessResponse((Map<String, Object>) readinessObj, modelId) : null)
+                    .overallScore(scoreObj != null ? ((Number) scoreObj).doubleValue() : null)
+                    .build();
+        } catch (Exception e) {
+            log.error("Error converting complete evaluation response: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to convert complete evaluation response", e);
+        }
     }
+
+    // ==================== HELPER CONVERTERS ====================
 
     private EvaluationDTO.ConfusionMatrix convertConfusionMatrix(Map<String, Object> data) {
         if (data == null) return null;
 
         return EvaluationDTO.ConfusionMatrix.builder()
-                .tn(((Number) data.get("tn")).longValue())
-                .fp(((Number) data.get("fp")).longValue())
-                .fn(((Number) data.get("fn")).longValue())
-                .tp(((Number) data.get("tp")).longValue())
-                .total(((Number) data.get("total")).longValue())
+                .tn(toLong(data.get("tn")))
+                .fp(toLong(data.get("fp")))
+                .fn(toLong(data.get("fn")))
+                .tp(toLong(data.get("tp")))
+                .total(toLong(data.get("total")))
                 .build();
     }
 
@@ -278,8 +419,8 @@ public class EvaluationService {
     private EvaluationDTO.ReadinessSummary convertReadinessSummary(Map<String, Object> data) {
         if (data == null) return null;
 
-        Integer passed = ((Number) data.get("passed")).intValue();
-        Integer total = ((Number) data.get("total_criteria")).intValue();
+        Integer passed = toLong(data.get("passed")).intValue();
+        Integer total = toLong(data.get("total_criteria")).intValue();
 
         return EvaluationDTO.ReadinessSummary.builder()
                 .passed(passed)
@@ -288,8 +429,15 @@ public class EvaluationService {
                 .build();
     }
 
+    // ==================== TYPE CONVERSION HELPERS ====================
+
     private Double toDouble(Object value) {
         if (value == null) return null;
         return ((Number) value).doubleValue();
+    }
+
+    private Long toLong(Object value) {
+        if (value == null) return 0L;
+        return ((Number) value).longValue();
     }
 }
