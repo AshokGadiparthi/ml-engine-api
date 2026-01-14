@@ -328,7 +328,22 @@ public class EvaluationDTO {
             result.setBusinessImpact((Map<String, Object>) response.get("business_impact"));
             result.setCurves((Map<String, Object>) response.get("curves"));
             result.setLearningCurve((Map<String, Object>) response.get("learning_curve"));
-            result.setFeatureImportance((Map<String, Object>) response.get("feature_importance"));
+
+            // ✅ CRITICAL: Preserve feature_importance as-is from FastAPI
+            Map<String, Object> featureImportance = (Map<String, Object>) response.get("feature_importance");
+            result.setFeatureImportance(featureImportance);
+
+            // Log the feature names being received
+            if (featureImportance != null) {
+                List<Map<String, Object>> features = (List<Map<String, Object>>) featureImportance.get("features");
+                if (features != null && !features.isEmpty()) {
+                    List<String> featureNames = features.stream()
+                            .map(f -> (String) f.get("name"))
+                            .toList();
+                    System.out.println("✅ Feature names preserved: " + featureNames);
+                }
+            }
+
             result.setOptimalThreshold((Map<String, Object>) response.get("optimal_threshold"));
             result.setProductionReadiness((Map<String, Object>) response.get("production_readiness"));
             result.setTimestamp((String) response.get("timestamp"));
