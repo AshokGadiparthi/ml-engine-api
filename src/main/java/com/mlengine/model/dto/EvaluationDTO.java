@@ -270,22 +270,69 @@ public class EvaluationDTO {
     @AllArgsConstructor
     @Builder
     @Schema(description = "Complete evaluation response with all metrics")
-    public static class CompleteEvaluationResponse implements Serializable {
+    public class CompleteEvaluationResponse implements Serializable {
 
+        @JsonProperty("model_id")
         @Schema(description = "Model identifier")
         private String modelId;
 
-        @Schema(description = "Threshold evaluation results")
-        private ThresholdEvaluationResponse thresholdEvaluation;
+        @JsonProperty("evaluation")
+        @Schema(description = "Threshold evaluation results including confusion matrix, metrics, rates, and counts")
+        private Map<String, Object> evaluation;
 
-        @Schema(description = "Business impact results")
-        private BusinessImpactResponse businessImpact;
+        @JsonProperty("business_impact")
+        @Schema(description = "Business impact analysis including costs, revenue, and financial metrics")
+        private Map<String, Object> businessImpact;
 
-        @Schema(description = "Production readiness assessment")
-        private ProductionReadinessResponse productionReadiness;
+        @JsonProperty("curves")
+        @Schema(description = "ROC and PR curve data for model performance visualization")
+        private Map<String, Object> curves;
 
-        @Schema(description = "Overall quality score")
-        private Double overallScore;
+        @JsonProperty("learning_curve")
+        @Schema(description = "Learning curve analysis showing test/train performance and overfitting status")
+        private Map<String, Object> learningCurve;
+
+        @JsonProperty("feature_importance")
+        @Schema(description = "Feature importance with correlation analysis and feature interactions")
+        private Map<String, Object> featureImportance;
+
+        @JsonProperty("optimal_threshold")
+        @Schema(description = "Optimal threshold analysis with profit maximization")
+        private Map<String, Object> optimalThreshold;
+
+        @JsonProperty("production_readiness")
+        @Schema(description = "Production readiness assessment with 19-point checklist")
+        private Map<String, Object> productionReadiness;
+
+        @JsonProperty("timestamp")
+        @Schema(description = "Response timestamp")
+        private String timestamp;
+
+        /**
+         * Capture any additional fields from FastAPI response
+         * This ensures we don't lose any data even if FastAPI adds new fields
+         */
+        @JsonAnySetter
+        private Map<String, Object> additionalProperties = new HashMap<>();
+
+        /**
+         * Static builder method to create from FastAPI response
+         */
+        public static CompleteEvaluationResponse fromFastAPIResponse(Map<String, Object> response) {
+            CompleteEvaluationResponse result = new CompleteEvaluationResponse();
+
+            result.setModelId((String) response.get("model_id"));
+            result.setEvaluation((Map<String, Object>) response.get("evaluation"));
+            result.setBusinessImpact((Map<String, Object>) response.get("business_impact"));
+            result.setCurves((Map<String, Object>) response.get("curves"));
+            result.setLearningCurve((Map<String, Object>) response.get("learning_curve"));
+            result.setFeatureImportance((Map<String, Object>) response.get("feature_importance"));
+            result.setOptimalThreshold((Map<String, Object>) response.get("optimal_threshold"));
+            result.setProductionReadiness((Map<String, Object>) response.get("production_readiness"));
+            result.setTimestamp((String) response.get("timestamp"));
+
+            return result;
+        }
     }
 
     // ==================== SHARED MODELS ====================
